@@ -5,20 +5,31 @@ edition = "2024"
 rust-version = "1.94"
 
 [dependencies]
+argon2 = "0.6.0"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+base64 = "0.23.1"
+jsonwebtoken = { version = "11.1.0", default-features = false, features = ["rust_crypto"] }
 # Keep bundled SQLite on a release with the WAL-reset fix.
 libsqlite3-sys = { version = "0.37", default-features = false }
+rand = "0.10.3"
+rpassword = "7.5.4"
+secrecy = "0.10.3"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
+subtle = "2.6.1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = "1.26.1"
+zeroize = "1.9.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
-serde_json = "1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
