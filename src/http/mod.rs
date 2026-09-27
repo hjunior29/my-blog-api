@@ -14,16 +14,47 @@ use axum::{
 use sqlx::SqlitePool;
 use tower_http::trace::TraceLayer;
 
-use crate::health::handler;
+use crate::{config::Config, health::handler};
 use error::ApiError;
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
-pub fn router(pool: SqlitePool) -> Router {
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: SqlitePool,
+    pub config: Config,
+}
+
+impl axum::extract::FromRef<AppState> for SqlitePool {
+    fn from_ref(state: &AppState) -> Self {
+        state.pool.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Config {
+    fn from_ref(state: &AppState) -> Self {
+        state.config.clone()
+    }
+}
+
+pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
+    let state = AppState {
+        pool,
+        config: config.clone(),
+    };
+
+    let auth_routes = crate::auth::router().layer(middleware::from_fn_with_state(
+        config.clone(),
+        crate::auth::check_origin,
+    ));
+
+    let api_routes = Router::new().nest("/auth", auth_routes);
+
     Router::new()
         .route("/health", get(handler::live))
         .route("/ready", get(handler::ready))
-        .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "not_found", "Route not found") })
+        .nest("/api/v1", api_routes)
+        .fallback(|| async { ApiError::not_found("Route not found") })
         .method_not_allowed_fallback(|| async {
             ApiError::new(
                 StatusCode::METHOD_NOT_ALLOWED,
@@ -34,7 +65,12 @@ pub fn router(pool: SqlitePool) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn(request_timeout))
         .layer(TraceLayer::new_for_http())
-        .with_state(pool)
+        .with_state(state)
+}
+
+pub fn router(pool: SqlitePool) -> Router {
+    let config = Config::from_lookup(|_| Ok(None)).expect("default test config");
+    router_with_config(pool, config)
 }
 
 async fn request_timeout(request: Request, next: Next) -> Response {

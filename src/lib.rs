@@ -6,4 +6,4 @@ pub mod http;
 pub mod shutdown;
 pub mod users;
 
-pub use http::router;
+pub use http::{AppState, router, router_with_config};

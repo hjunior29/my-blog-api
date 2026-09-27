@@ -1,0 +1,306 @@
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
+};
+use sqlx::SqlitePool;
+
+use super::{
+    cookie::{self, access_cookie_name, refresh_cookie_name},
+    dto::{CsrfResponse, LoginRequest, LoginResponse},
+    jwt,
+    middleware::{AuthenticatedUser, verify_csrf},
+    password, session,
+};
+use crate::{
+    config::Config,
+    http::{error::ApiError, json::Json},
+    users::{
+        model::{UserProfile, UserStatus},
+        repository,
+        service::{current_unix_time, normalize_email},
+    },
+};
+
+pub async fn login(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    headers: HeaderMap,
+    Json(payload): Json<LoginRequest>,
+) -> Result<Response, ApiError> {
+    let normalized = match normalize_email(&payload.email) {
+        Ok(e) => e,
+        Err(_) => {
+            let _ = password::dummy_verify(payload.password).await;
+            return Err(ApiError::invalid_credentials());
+        }
+    };
+
+    let user = match repository::find_by_normalized_email(&pool, &normalized).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            let _ = password::dummy_verify(payload.password).await;
+            return Err(ApiError::invalid_credentials());
+        }
+        Err(_) => return Err(ApiError::internal()),
+    };
+
+    if user.status != UserStatus::Active {
+        let _ = password::dummy_verify(payload.password).await;
+        return Err(ApiError::invalid_credentials());
+    }
+
+    let is_valid = password::verify_password(payload.password, user.password_hash.clone())
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    if !is_valid {
+        return Err(ApiError::invalid_credentials());
+    }
+
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok());
+    let now = current_unix_time();
+
+    let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
+    let (session, raw_refresh_token) =
+        session::create_session(&mut conn, user.id, user_agent, None, now)
+            .await
+            .map_err(|_| ApiError::internal())?;
+
+    let access_token = jwt::create_access_token(&config, user.id, &session.id, session.expires_at)
+        .map_err(|_| ApiError::internal())?;
+
+    let (access_cookie, refresh_cookie) = cookie::build_auth_cookies(
+        &config,
+        &access_token,
+        &raw_refresh_token,
+        session.expires_at - now,
+    );
+
+    let response_body = LoginResponse {
+        user: UserProfile::from(&user),
+        csrf_token: session.csrf_token,
+    };
+
+    let mut response = (StatusCode::OK, Json(response_body)).into_response();
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, access_cookie);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, refresh_cookie);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+
+    Ok(response)
+}
+
+pub async fn csrf(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let now = current_unix_time();
+    let access_name = access_cookie_name(config.secure_cookies);
+
+    if let Some(token) = cookie::extract_cookie(&headers, access_name)
+        && let Ok(claims) = jwt::verify_access_token(&config, &token)
+        && let Ok(Some(session)) = session::find_active_session(&pool, &claims.sid, now).await
+    {
+        let mut response = (
+            StatusCode::OK,
+            Json(CsrfResponse {
+                csrf_token: session.csrf_token,
+            }),
+        )
+            .into_response();
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        );
+        return Ok(response);
+    }
+
+    let refresh_name = refresh_cookie_name(config.secure_cookies);
+    if let Some(raw_refresh) = cookie::extract_cookie(&headers, refresh_name) {
+        let token_hash = session::hash_token(&raw_refresh);
+        let row = sqlx::query_as::<_, session::RefreshTokenRow>(
+            "SELECT token_hash, session_id, created_at, expires_at, consumed_at, replaced_by_hash
+             FROM refresh_tokens WHERE token_hash = ? AND consumed_at IS NULL",
+        )
+        .bind(&token_hash)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+        if let Some(token_record) = row
+            && let Ok(Some(session)) =
+                session::find_active_session(&pool, &token_record.session_id, now).await
+        {
+            let mut response = (
+                StatusCode::OK,
+                Json(CsrfResponse {
+                    csrf_token: session.csrf_token,
+                }),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("no-store"),
+            );
+            return Ok(response);
+        }
+    }
+
+    Err(ApiError::unauthorized("No active session found"))
+}
+
+pub async fn refresh(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let refresh_name = refresh_cookie_name(config.secure_cookies);
+    let raw_refresh = cookie::extract_cookie(&headers, refresh_name)
+        .ok_or_else(|| ApiError::unauthorized("Missing refresh token"))?;
+
+    let csrf_header = headers.get("x-csrf-token").and_then(|h| h.to_str().ok());
+    let now = current_unix_time();
+    let (session, new_raw_token) =
+        match session::rotate_refresh_token(&pool, &raw_refresh, csrf_header, now).await {
+            Ok(res) => res,
+            Err(session::SessionError::InvalidCsrf) => return Err(ApiError::invalid_csrf_token()),
+            Err(session::SessionError::ReplayDetected) => {
+                let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
+                let mut response = ApiError::unauthorized("Invalid refresh token").into_response();
+                response
+                    .headers_mut()
+                    .append(header::SET_COOKIE, clear_access);
+                response
+                    .headers_mut()
+                    .append(header::SET_COOKIE, clear_refresh);
+                return Ok(response);
+            }
+            Err(_) => return Err(ApiError::unauthorized("Invalid refresh token")),
+        };
+
+    let user = repository::find_by_id(&pool, session.user_id)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| ApiError::unauthorized("User not found"))?;
+
+    if user.status != UserStatus::Active {
+        return Err(ApiError::unauthorized("User inactive"));
+    }
+
+    let access_token = jwt::create_access_token(&config, user.id, &session.id, session.expires_at)
+        .map_err(|_| ApiError::internal())?;
+
+    let (access_cookie, refresh_cookie) = cookie::build_auth_cookies(
+        &config,
+        &access_token,
+        &new_raw_token,
+        session.expires_at - now,
+    );
+
+    let mut response = (
+        StatusCode::OK,
+        Json(CsrfResponse {
+            csrf_token: session.csrf_token,
+        }),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, access_cookie);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, refresh_cookie);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+
+    Ok(response)
+}
+
+pub async fn logout(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    auth: Result<AuthenticatedUser, ApiError>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let now = current_unix_time();
+    let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
+
+    if let Ok(auth_user) = auth {
+        verify_csrf(&headers, &auth_user.session.csrf_token)?;
+        let _ = session::revoke_session(&pool, &auth_user.session.id, now).await;
+    } else {
+        let refresh_name = refresh_cookie_name(config.secure_cookies);
+        if let Some(raw_refresh) = cookie::extract_cookie(&headers, refresh_name) {
+            let token_hash = session::hash_token(&raw_refresh);
+            let query_res = sqlx::query_as::<_, session::RefreshTokenRow>(
+                "SELECT token_hash, session_id, created_at, expires_at, consumed_at, replaced_by_hash
+                 FROM refresh_tokens WHERE token_hash = ?",
+            )
+            .bind(&token_hash)
+            .fetch_optional(&pool)
+            .await;
+            if let Ok(Some(record)) = query_res
+                && let Ok(Some(s)) =
+                    session::find_active_session(&pool, &record.session_id, now).await
+            {
+                verify_csrf(&headers, &s.csrf_token)?;
+                let _ = session::revoke_session(&pool, &record.session_id, now).await;
+            }
+        }
+    }
+
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, clear_access);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, clear_refresh);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+
+    Ok(response)
+}
+
+pub async fn logout_all(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    auth: AuthenticatedUser,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let now = current_unix_time();
+
+    session::revoke_all_user_sessions(&pool, auth.user.id, now)
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, clear_access);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, clear_refresh);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+
+    Ok(response)
+}

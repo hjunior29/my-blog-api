@@ -36,3 +36,12 @@ where
             })
     }
 }
+
+impl<T> axum::response::IntoResponse for Json<T>
+where
+    T: serde::Serialize,
+{
+    fn into_response(self) -> axum::response::Response {
+        axum::Json(self.0).into_response()
+    }
+}

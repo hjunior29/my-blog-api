@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use my_blog_api::{config::Config, database, router, shutdown::Shutdown};
+use my_blog_api::{config::Config, database, router_with_config, shutdown::Shutdown};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -24,7 +24,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     let pool = database::connect(&config.database_url, config.database_max_connections).await?;
     tracing::info!(address = %listener.local_addr()?, "HTTP server listening");
-    let result = axum::serve(listener, router(pool.clone()))
+    let result = axum::serve(listener, router_with_config(pool.clone(), config))
         .with_graceful_shutdown(shutdown.wait())
         .await;
     pool.close().await;

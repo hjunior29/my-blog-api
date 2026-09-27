@@ -94,6 +94,33 @@ impl From<&User> for PublicUser {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserProfile {
+    pub id: i64,
+    pub email: String,
+    pub display_name: String,
+    pub bio: String,
+    pub avatar_media_id: Option<String>,
+    pub role: UserRole,
+    pub status: UserStatus,
+    pub created_at: i64,
+}
+
+impl From<&User> for UserProfile {
+    fn from(user: &User) -> Self {
+        Self {
+            id: user.id,
+            email: user.email.clone(),
+            display_name: user.display_name.clone(),
+            bio: user.bio.clone(),
+            avatar_media_id: user.avatar_media_id.clone(),
+            role: user.role,
+            status: user.status,
+            created_at: user.created_at,
+        }
+    }
+}
+
 pub struct NewUser<'a> {
     pub email: &'a str,
     pub normalized_email: &'a str,
