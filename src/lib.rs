@@ -4,6 +4,7 @@ pub mod config;
 pub mod database;
 mod health;
 pub mod http;
+pub mod posts;
 pub mod shutdown;
 pub mod users;
 
