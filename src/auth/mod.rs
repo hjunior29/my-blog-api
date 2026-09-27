@@ -7,5 +7,5 @@ pub mod password;
 pub mod routes;
 pub mod session;
 
-pub use middleware::{AuthenticatedUser, check_origin};
+pub use middleware::{AuthenticatedUser, RequireOwner, check_origin};
 pub use routes::router;

@@ -254,3 +254,60 @@ pub async fn revoke_all_user_sessions(
         .await?;
     Ok(())
 }
+
+pub async fn list_user_sessions(
+    pool: &SqlitePool,
+    user_id: i64,
+    now: i64,
+) -> Result<Vec<AuthSession>, SessionError> {
+    let sessions = sqlx::query_as::<_, AuthSession>(
+        "SELECT id, user_id, csrf_token, user_agent, ip_address, created_at, expires_at, revoked_at
+         FROM auth_sessions
+         WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
+         ORDER BY created_at DESC",
+    )
+    .bind(user_id)
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(sessions)
+}
+
+pub async fn revoke_user_session(
+    pool: &SqlitePool,
+    user_id: i64,
+    session_id: &str,
+    now: i64,
+) -> Result<bool, SessionError> {
+    let res = sqlx::query(
+        "UPDATE auth_sessions SET revoked_at = ?
+         WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+    )
+    .bind(now)
+    .bind(session_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    Ok(res.rows_affected() > 0)
+}
+
+pub async fn revoke_other_user_sessions(
+    pool: &SqlitePool,
+    user_id: i64,
+    current_session_id: &str,
+    now: i64,
+) -> Result<(), SessionError> {
+    sqlx::query(
+        "UPDATE auth_sessions SET revoked_at = ?
+         WHERE user_id = ? AND id != ? AND revoked_at IS NULL",
+    )
+    .bind(now)
+    .bind(user_id)
+    .bind(current_session_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}

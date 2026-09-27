@@ -43,12 +43,17 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
         config: config.clone(),
     };
 
-    let auth_routes = crate::auth::router().layer(middleware::from_fn_with_state(
-        config.clone(),
-        crate::auth::check_origin,
-    ));
+    let origin_check_layer =
+        middleware::from_fn_with_state(config.clone(), crate::auth::check_origin);
 
-    let api_routes = Router::new().nest("/auth", auth_routes);
+    let auth_routes = crate::auth::router().layer(origin_check_layer.clone());
+    let users_routes = crate::users::router().layer(origin_check_layer.clone());
+    let admin_routes = crate::admin::router().layer(origin_check_layer);
+
+    let api_routes = Router::new()
+        .nest("/auth", auth_routes)
+        .nest("/users", users_routes)
+        .nest("/admin", admin_routes);
 
     Router::new()
         .route("/health", get(handler::live))

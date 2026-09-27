@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 
 use super::handler;
@@ -13,4 +13,6 @@ pub fn router() -> Router<AppState> {
         .route("/refresh", post(handler::refresh))
         .route("/logout", post(handler::logout))
         .route("/logout-all", post(handler::logout_all))
+        .route("/sessions", get(handler::list_sessions))
+        .route("/sessions/{id}", delete(handler::delete_session))
 }

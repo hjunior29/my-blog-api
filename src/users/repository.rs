@@ -122,3 +122,31 @@ pub async fn list(pool: &SqlitePool, limit: i64, offset: i64) -> Result<Vec<User
     .fetch_all(pool)
     .await
 }
+
+pub async fn count_users(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await
+}
+
+pub async fn update_profile(
+    pool: &SqlitePool,
+    id: i64,
+    display_name: &str,
+    bio: &str,
+    avatar_media_id: Option<&str>,
+    now: i64,
+) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET display_name = ?, bio = ?, avatar_media_id = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(display_name)
+    .bind(bio)
+    .bind(avatar_media_id)
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    find_by_id(pool, id).await
+}

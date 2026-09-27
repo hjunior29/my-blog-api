@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use super::{
     cookie::{self, access_cookie_name, refresh_cookie_name},
-    dto::{CsrfResponse, LoginRequest, LoginResponse},
+    dto::{CsrfResponse, LoginRequest, LoginResponse, SessionItemResponse},
     jwt,
     middleware::{AuthenticatedUser, verify_csrf},
     password, session,
@@ -297,6 +297,73 @@ pub async fn logout_all(
     response
         .headers_mut()
         .append(header::SET_COOKIE, clear_refresh);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+
+    Ok(response)
+}
+
+pub async fn list_sessions(
+    State(pool): State<SqlitePool>,
+    auth: AuthenticatedUser,
+) -> Result<Response, ApiError> {
+    let now = current_unix_time();
+    let sessions = session::list_user_sessions(&pool, auth.user.id, now)
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    let items: Vec<SessionItemResponse> = sessions
+        .into_iter()
+        .map(|s| SessionItemResponse {
+            is_current: s.id == auth.session.id,
+            id: s.id,
+            user_agent: s.user_agent,
+            ip_address: s.ip_address,
+            created_at: s.created_at,
+            expires_at: s.expires_at,
+        })
+        .collect();
+
+    let mut response = (StatusCode::OK, Json(items)).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+
+    Ok(response)
+}
+
+pub async fn delete_session(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    auth: AuthenticatedUser,
+    headers: HeaderMap,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Response, ApiError> {
+    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let now = current_unix_time();
+
+    let was_revoked = session::revoke_user_session(&pool, auth.user.id, &session_id, now)
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    if !was_revoked {
+        return Err(ApiError::not_found("Session not found"));
+    }
+
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if session_id == auth.session.id {
+        let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, clear_access);
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, clear_refresh);
+    }
+
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         header::HeaderValue::from_static("no-store"),

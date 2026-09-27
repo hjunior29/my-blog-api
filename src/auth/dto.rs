@@ -29,3 +29,13 @@ pub struct LoginResponse {
 pub struct CsrfResponse {
     pub csrf_token: String,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionItemResponse {
+    pub id: String,
+    pub user_agent: Option<String>,
+    pub ip_address: Option<String>,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub is_current: bool,
+}

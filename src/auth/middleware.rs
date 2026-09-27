@@ -15,7 +15,7 @@ use crate::{
     config::Config,
     http::error::ApiError,
     users::{
-        model::{User, UserStatus},
+        model::{User, UserRole, UserStatus},
         repository,
         service::current_unix_time,
     },
@@ -102,6 +102,26 @@ where
         }
 
         Ok(Self { user, session })
+    }
+}
+
+#[derive(Clone)]
+pub struct RequireOwner(pub AuthenticatedUser);
+
+impl<S> FromRequestParts<S> for RequireOwner
+where
+    SqlitePool: FromRef<S>,
+    Config: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth = AuthenticatedUser::from_request_parts(parts, state).await?;
+        if auth.user.role != UserRole::Owner {
+            return Err(ApiError::forbidden("Insufficient permissions"));
+        }
+        Ok(Self(auth))
     }
 }
 
