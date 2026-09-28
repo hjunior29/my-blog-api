@@ -10,4 +10,5 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/users", get(users_handler::list_users))
         .route("/users/{id}", patch(users_handler::update_user))
+        .merge(crate::posts::admin_routes::router())
 }

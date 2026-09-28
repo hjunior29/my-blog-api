@@ -37,6 +37,8 @@ impl axum::extract::FromRef<AppState> for Config {
     }
 }
 
+pub const ROOT_BODY_LIMIT_BYTES: usize = 384 * 1024;
+
 pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
     let state = AppState {
         pool,
@@ -49,11 +51,13 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
     let auth_routes = crate::auth::router().layer(origin_check_layer.clone());
     let users_routes = crate::users::router().layer(origin_check_layer.clone());
     let admin_routes = crate::admin::router().layer(origin_check_layer);
+    let posts_routes = crate::posts::router();
 
     let api_routes = Router::new()
         .nest("/auth", auth_routes)
         .nest("/users", users_routes)
-        .nest("/admin", admin_routes);
+        .nest("/admin", admin_routes)
+        .merge(posts_routes);
 
     Router::new()
         .route("/health", get(handler::live))
@@ -67,7 +71,7 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
                 "Method not allowed",
             )
         })
-        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(DefaultBodyLimit::max(ROOT_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn(request_timeout))
         .layer(TraceLayer::new_for_http())
         .with_state(state)

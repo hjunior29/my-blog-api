@@ -22,6 +22,7 @@ pub struct UpdatePostDto {
     pub status: Option<PostStatus>,
     pub tags: Option<Vec<String>>,
     pub scheduled_for: Option<i64>,
+    #[serde(default)]
     pub version: i64,
 }
 
@@ -40,6 +41,14 @@ impl From<&Tag> for TagDto {
             slug: t.slug.clone(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagWithCountDto {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+    pub post_count: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -131,4 +140,27 @@ pub struct SearchQuery {
     pub q: String,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminPostQuery {
+    pub status: Option<PostStatus>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PaginationQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PreviewPostDto {
+    pub content_md: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PreviewPostResponse {
+    pub content_html: String,
 }

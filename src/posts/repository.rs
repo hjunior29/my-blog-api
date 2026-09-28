@@ -243,3 +243,88 @@ pub async fn count_search_published_fts(
     .fetch_one(pool)
     .await
 }
+
+pub async fn list_posts_admin(
+    pool: &SqlitePool,
+    author_id: Option<i64>,
+    status: Option<PostStatus>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Post>, sqlx::Error> {
+    let status_str = status.map(|s| s.to_string());
+    sqlx::query_as::<_, Post>(
+        "SELECT id, slug, title, summary, content_md, content_html,
+                featured_image_media_id, status, author_id, published_at,
+                scheduled_for, created_at, updated_at, version
+         FROM posts
+         WHERE (? IS NULL OR author_id = ?)
+           AND (? IS NULL OR status = ?)
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ? OFFSET ?",
+    )
+    .bind(author_id)
+    .bind(author_id)
+    .bind(status_str.as_deref())
+    .bind(status_str.as_deref())
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn count_posts_admin(
+    pool: &SqlitePool,
+    author_id: Option<i64>,
+    status: Option<PostStatus>,
+) -> Result<i64, sqlx::Error> {
+    let status_str = status.map(|s| s.to_string());
+    sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM posts
+         WHERE (? IS NULL OR author_id = ?)
+           AND (? IS NULL OR status = ?)",
+    )
+    .bind(author_id)
+    .bind(author_id)
+    .bind(status_str.as_deref())
+    .bind(status_str.as_deref())
+    .fetch_one(pool)
+    .await
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TagWithCount {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+    pub post_count: i64,
+}
+
+pub async fn list_tags_with_published_count(
+    pool: &SqlitePool,
+) -> Result<Vec<TagWithCount>, sqlx::Error> {
+    sqlx::query_as::<_, TagWithCount>(
+        "SELECT t.id, t.name, t.slug, COUNT(p.id) AS post_count
+         FROM tags t
+         JOIN post_tags pt ON pt.tag_id = t.id
+         JOIN posts p ON p.id = pt.post_id AND p.status = 'published'
+         GROUP BY t.id, t.name, t.slug
+         HAVING post_count > 0
+         ORDER BY post_count DESC, t.name ASC",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn delete_post_with_version(
+    pool: &SqlitePool,
+    id: i64,
+    expected_version: i64,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM posts WHERE id = ? AND version = ?")
+        .bind(id)
+        .bind(expected_version)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected() > 0)
+}

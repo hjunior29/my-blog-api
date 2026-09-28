@@ -371,3 +371,114 @@ pub async fn search_published_posts(
         offset,
     })
 }
+
+pub fn preview_markdown(markdown: &str) -> String {
+    markdown::render_and_sanitize(markdown)
+}
+
+pub async fn list_published_tags(
+    pool: &SqlitePool,
+) -> Result<Vec<super::dto::TagWithCountDto>, PostServiceError> {
+    let tags = repository::list_tags_with_published_count(pool).await?;
+    Ok(tags
+        .into_iter()
+        .map(|t| super::dto::TagWithCountDto {
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            post_count: t.post_count,
+        })
+        .collect())
+}
+
+pub async fn list_admin_posts(
+    pool: &SqlitePool,
+    author_id: Option<i64>,
+    status: Option<PostStatus>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<PostListResponse, PostServiceError> {
+    let limit = limit.unwrap_or(20).clamp(1, 50);
+    let offset = offset.unwrap_or(0).max(0);
+
+    let total = repository::count_posts_admin(pool, author_id, status).await?;
+    let posts = repository::list_posts_admin(pool, author_id, status, limit, offset).await?;
+
+    let mut items = Vec::with_capacity(posts.len());
+    for post in posts {
+        let tags = repository::get_tags_for_post(pool, post.id).await?;
+        let pwt = PostWithTags { post, tags };
+        items.push(PostSummaryResponse::from(&pwt));
+    }
+
+    Ok(PostListResponse {
+        items,
+        total,
+        limit,
+        offset,
+    })
+}
+
+pub async fn publish_post(
+    pool: &SqlitePool,
+    id: i64,
+    expected_version: i64,
+) -> Result<PostWithTags, PostServiceError> {
+    update_post(
+        pool,
+        id,
+        UpdatePostDto {
+            title: None,
+            summary: None,
+            content_md: None,
+            featured_image_media_id: None,
+            status: Some(PostStatus::Published),
+            tags: None,
+            scheduled_for: None,
+            version: expected_version,
+        },
+    )
+    .await
+}
+
+pub async fn unpublish_post(
+    pool: &SqlitePool,
+    id: i64,
+    expected_version: i64,
+) -> Result<PostWithTags, PostServiceError> {
+    update_post(
+        pool,
+        id,
+        UpdatePostDto {
+            title: None,
+            summary: None,
+            content_md: None,
+            featured_image_media_id: None,
+            status: Some(PostStatus::Draft),
+            tags: None,
+            scheduled_for: None,
+            version: expected_version,
+        },
+    )
+    .await
+}
+
+pub async fn delete_post_versioned(
+    pool: &SqlitePool,
+    id: i64,
+    expected_version: i64,
+) -> Result<(), PostServiceError> {
+    let post = repository::find_post_by_id(pool, id)
+        .await?
+        .ok_or(PostServiceError::PostNotFound)?;
+
+    if post.version != expected_version {
+        return Err(PostServiceError::VersionConflict);
+    }
+
+    let deleted = repository::delete_post_with_version(pool, id, expected_version).await?;
+    if !deleted {
+        return Err(PostServiceError::VersionConflict);
+    }
+    Ok(())
+}
