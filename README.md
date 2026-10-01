@@ -18,7 +18,7 @@ adding cache layers. SQLx executes SQLite operations on dedicated worker threads
 Install Rust 1.94 or newer, then run from this directory:
 
 ```sh
-cargo run
+cargo run --bin my-blog-api
 curl --fail http://127.0.0.1:3000/health
 curl --fail http://127.0.0.1:3000/ready
 ```
@@ -32,6 +32,8 @@ Environment variables are read from the process. `.env.example` documents them;
 | `DATABASE_URL` | `sqlite://blog.db` | SQLx SQLite connection URL |
 | `DATABASE_MAX_CONNECTIONS` | `4` | Pool size, from 1 to 16 |
 | `RUST_LOG` | `info` | tracing filter |
+| `APP_ORIGIN` | `http://localhost:5173` | Exact browser origin for mutation checks |
+| `OWNER_ONLY` | `true` | Restrict authentication to active owners |
 
 The database file is created automatically. Its parent directory must exist and
 be writable. Startup fails on connection or migration errors, before serving HTTP.
@@ -76,9 +78,12 @@ migration files change.
 - Handlers have a 10-second deadline. SQLite acquisition waits at most 3 seconds;
   lock contention waits at most 5 seconds.
 
-No business endpoints or authentication flows have been specified yet. No public
-write endpoints are exposed. CORS is disabled; enable explicit origins if a
-separate frontend origin is introduced. Request tracing is available with
+Public `/api/v1/posts`, `/api/v1/posts/search`, `/api/v1/posts/{slug}` and
+`/api/v1/tags` expose published content. `/api/v1/auth` handles cookie sessions;
+`/api/v1/users/me` handles profiles and `/api/v1/admin/posts` handles editorial
+writes with CSRF and version checks. Owner-only authentication is enabled by
+default. No public registration endpoint exists. CORS is disabled: serve the
+frontend and API behind a shared origin, including the Vite proxy locally. Request tracing is available with
 `RUST_LOG=info,tower_http=debug`; avoid logging sensitive request data.
 
 ## SQLite and deployment
