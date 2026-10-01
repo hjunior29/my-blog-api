@@ -16,7 +16,7 @@ use crate::{
     config::Config,
     http::{error::ApiError, json::Json},
     users::{
-        model::{UserProfile, UserStatus},
+        model::{UserProfile, UserRole, UserStatus},
         repository,
         service::{current_unix_time, normalize_email},
     },
@@ -45,7 +45,7 @@ pub async fn login(
         Err(_) => return Err(ApiError::internal()),
     };
 
-    if user.status != UserStatus::Active {
+    if user.status != UserStatus::Active || (config.owner_only && user.role != UserRole::Owner) {
         let _ = password::dummy_verify(payload.password).await;
         return Err(ApiError::invalid_credentials());
     }
@@ -105,58 +105,51 @@ pub async fn csrf(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let now = current_unix_time();
-    let access_name = access_cookie_name(config.secure_cookies);
-
-    if let Some(token) = cookie::extract_cookie(&headers, access_name)
+    let mut active = None;
+    if let Some(token) = cookie::extract_cookie(&headers, access_cookie_name(config.secure_cookies))
         && let Ok(claims) = jwt::verify_access_token(&config, &token)
-        && let Ok(Some(session)) = session::find_active_session(&pool, &claims.sid, now).await
     {
-        let mut response = (
-            StatusCode::OK,
-            Json(CsrfResponse {
-                csrf_token: session.csrf_token,
-            }),
-        )
-            .into_response();
-        response.headers_mut().insert(
-            header::CACHE_CONTROL,
-            header::HeaderValue::from_static("no-store"),
-        );
-        return Ok(response);
-    }
-
-    let refresh_name = refresh_cookie_name(config.secure_cookies);
-    if let Some(raw_refresh) = cookie::extract_cookie(&headers, refresh_name) {
-        let token_hash = session::hash_token(&raw_refresh);
-        let row = sqlx::query_as::<_, session::RefreshTokenRow>(
-            "SELECT token_hash, session_id, created_at, expires_at, consumed_at, replaced_by_hash
-             FROM refresh_tokens WHERE token_hash = ? AND consumed_at IS NULL",
-        )
-        .bind(&token_hash)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|_| ApiError::internal())?;
-
-        if let Some(token_record) = row
-            && let Ok(Some(session)) =
-                session::find_active_session(&pool, &token_record.session_id, now).await
+        active = session::find_active_session(&pool, &claims.sid, now)
+            .await
+            .map_err(|_| ApiError::unavailable())?;
+        if active
+            .as_ref()
+            .is_some_and(|session| claims.sub != session.user_id.to_string())
         {
-            let mut response = (
-                StatusCode::OK,
-                Json(CsrfResponse {
-                    csrf_token: session.csrf_token,
-                }),
-            )
-                .into_response();
-            response.headers_mut().insert(
-                header::CACHE_CONTROL,
-                header::HeaderValue::from_static("no-store"),
-            );
-            return Ok(response);
+            return Err(ApiError::unauthorized("Invalid session"));
         }
     }
-
-    Err(ApiError::unauthorized("No active session found"))
+    if active.is_none()
+        && let Some(token) =
+            cookie::extract_cookie(&headers, refresh_cookie_name(config.secure_cookies))
+    {
+        let session_id: Option<String> = sqlx::query_scalar(
+            "SELECT session_id FROM refresh_tokens WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?",
+        ).bind(session::hash_token(&token)).bind(now).fetch_optional(&pool)
+            .await.map_err(|_| ApiError::unavailable())?;
+        if let Some(id) = session_id {
+            active = session::find_active_session(&pool, &id, now)
+                .await
+                .map_err(|_| ApiError::unavailable())?;
+        }
+    }
+    let active = active.ok_or_else(|| ApiError::unauthorized("No active session found"))?;
+    let user = repository::find_by_id(&pool, active.user_id)
+        .await
+        .map_err(|_| ApiError::unavailable())?
+        .ok_or_else(|| ApiError::unauthorized("Invalid session"))?;
+    if user.status != UserStatus::Active || (config.owner_only && user.role != UserRole::Owner) {
+        return Err(ApiError::unauthorized("Invalid session"));
+    }
+    let mut response = Json(CsrfResponse {
+        csrf_token: active.csrf_token,
+    })
+    .into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
 }
 
 pub async fn refresh(
@@ -185,6 +178,7 @@ pub async fn refresh(
                     .append(header::SET_COOKIE, clear_refresh);
                 return Ok(response);
             }
+            Err(session::SessionError::Database(_)) => return Err(ApiError::unavailable()),
             Err(_) => return Err(ApiError::unauthorized("Invalid refresh token")),
         };
 
@@ -193,7 +187,7 @@ pub async fn refresh(
         .map_err(|_| ApiError::internal())?
         .ok_or_else(|| ApiError::unauthorized("User not found"))?;
 
-    if user.status != UserStatus::Active {
+    if user.status != UserStatus::Active || (config.owner_only && user.role != UserRole::Owner) {
         return Err(ApiError::unauthorized("User inactive"));
     }
 
@@ -239,7 +233,9 @@ pub async fn logout(
 
     if let Ok(auth_user) = auth {
         verify_csrf(&headers, &auth_user.session.csrf_token)?;
-        let _ = session::revoke_session(&pool, &auth_user.session.id, now).await;
+        session::revoke_session(&pool, &auth_user.session.id, now)
+            .await
+            .map_err(|_| ApiError::unavailable())?;
     } else {
         let refresh_name = refresh_cookie_name(config.secure_cookies);
         if let Some(raw_refresh) = cookie::extract_cookie(&headers, refresh_name) {
@@ -250,13 +246,16 @@ pub async fn logout(
             )
             .bind(&token_hash)
             .fetch_optional(&pool)
-            .await;
-            if let Ok(Some(record)) = query_res
-                && let Ok(Some(s)) =
-                    session::find_active_session(&pool, &record.session_id, now).await
+            .await.map_err(|_| ApiError::unavailable())?;
+            if let Some(record) = query_res
+                && let Some(s) = session::find_active_session(&pool, &record.session_id, now)
+                    .await
+                    .map_err(|_| ApiError::unavailable())?
             {
                 verify_csrf(&headers, &s.csrf_token)?;
-                let _ = session::revoke_session(&pool, &record.session_id, now).await;
+                session::revoke_session(&pool, &record.session_id, now)
+                    .await
+                    .map_err(|_| ApiError::unavailable())?;
             }
         }
     }

@@ -97,7 +97,8 @@ where
             .map_err(|_| ApiError::internal())?
             .ok_or_else(|| ApiError::unauthorized("User not found"))?;
 
-        if user.status != UserStatus::Active {
+        if user.status != UserStatus::Active || (config.owner_only && user.role != UserRole::Owner)
+        {
             return Err(ApiError::unauthorized("User account is inactive"));
         }
 

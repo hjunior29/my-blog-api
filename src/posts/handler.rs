@@ -23,7 +23,7 @@ pub async fn list_posts(
     let mut response = (StatusCode::OK, Json(result)).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=60"),
+        header::HeaderValue::from_static("no-store"),
     );
     Ok(response)
 }
@@ -39,7 +39,7 @@ pub async fn search_posts(
     let mut response = (StatusCode::OK, Json(result)).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=60"),
+        header::HeaderValue::from_static("no-store"),
     );
     Ok(response)
 }
@@ -64,7 +64,7 @@ pub async fn get_post_by_slug(
     let mut response = (StatusCode::OK, Json(response_body)).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=60"),
+        header::HeaderValue::from_static("no-store"),
     );
     Ok(response)
 }
@@ -77,7 +77,7 @@ pub async fn list_tags(State(pool): State<SqlitePool>) -> Result<Response, ApiEr
     let mut response = (StatusCode::OK, Json(tags)).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=300"),
+        header::HeaderValue::from_static("no-store"),
     );
     Ok(response)
 }

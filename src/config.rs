@@ -21,6 +21,7 @@ pub struct Config {
     pub database_max_connections: u32,
     pub app_origin: String,
     pub secure_cookies: bool,
+    pub owner_only: bool,
     pub jwt_issuer: String,
     pub jwt_audience: String,
     pub jwt_active_key_id: String,
@@ -65,11 +66,17 @@ impl Config {
             return Err(ConfigError("DATABASE_MAX_CONNECTIONS"));
         }
 
-        let app_origin = lookup("APP_ORIGIN")?.unwrap_or_else(|| "http://localhost:3000".into());
+        let app_origin = lookup("APP_ORIGIN")?.unwrap_or_else(|| "http://localhost:5173".into());
         if !app_origin.starts_with("http://") && !app_origin.starts_with("https://") {
             return Err(ConfigError("APP_ORIGIN"));
         }
         let app_origin = app_origin.trim_end_matches('/').to_string();
+
+        let owner_only = match lookup("OWNER_ONLY")?.as_deref() {
+            None | Some("true") => true,
+            Some("false") => false,
+            _ => return Err(ConfigError("OWNER_ONLY")),
+        };
 
         let secure_cookies = match lookup("SECURE_COOKIES")?.as_deref() {
             Some("true") | Some("1") => true,
@@ -131,6 +138,7 @@ impl Config {
             database_max_connections,
             app_origin,
             secure_cookies,
+            owner_only,
             jwt_issuer,
             jwt_audience,
             jwt_active_key_id,
@@ -150,7 +158,7 @@ mod tests {
         assert!(config.bind_address.ip().is_loopback());
         assert_eq!(config.database_max_connections, 4);
         assert_eq!(config.database_url, "sqlite://blog.db");
-        assert_eq!(config.app_origin, "http://localhost:3000");
+        assert_eq!(config.app_origin, "http://localhost:5173");
         assert!(!config.secure_cookies);
         assert_eq!(config.jwt_active_key_id, "default");
         assert!(config.jwt_keys.contains_key("default"));

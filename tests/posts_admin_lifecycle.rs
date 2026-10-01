@@ -24,6 +24,7 @@ async fn test_app() -> (SqlitePool, Router, tempfile::TempDir) {
     let pool = database::connect(&url, 4).await.unwrap();
 
     let config = Config::from_lookup(|key| match key {
+        "OWNER_ONLY" => Ok(Some("false".into())),
         "APP_ENV" => Ok(Some("test".into())),
         "APP_ORIGIN" => Ok(Some("http://localhost:3000".into())),
         "SECURE_COOKIES" => Ok(Some("false".into())),
