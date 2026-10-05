@@ -127,6 +127,13 @@ async fn security_headers(
             axum::http::HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
         );
     }
+    headers
+        .entry(axum::http::header::CONTENT_SECURITY_POLICY)
+        .or_insert_with(|| {
+            axum::http::HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';",
+            )
+        });
     response
 }
 
@@ -164,5 +171,35 @@ mod tests {
         let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body["error"]["code"], "request_timeout");
+    }
+
+    #[tokio::test]
+    async fn security_headers_middleware_attaches_expected_headers() {
+        let config = Config::from_lookup(|_| Ok(None)).expect("default test config");
+        let app = Router::new()
+            .route("/test", get(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(config, security_headers));
+
+        let req = Request::builder()
+            .uri("/test")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+
+        assert_eq!(
+            res.headers().get(axum::http::header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
+        );
+        assert_eq!(
+            res.headers().get(axum::http::header::X_FRAME_OPTIONS).unwrap(),
+            "DENY"
+        );
+        assert_eq!(
+            res.headers().get(axum::http::header::REFERRER_POLICY).unwrap(),
+            "strict-origin-when-cross-origin"
+        );
+        assert!(
+            res.headers().contains_key(axum::http::header::CONTENT_SECURITY_POLICY)
+        );
     }
 }
