@@ -91,7 +91,7 @@ pub async fn create_challenge(
 ) -> Result<(String, String), TwoFactorError> {
     let active_row: Option<(i64, i64)> = sqlx::query_as(
         "SELECT created_at, last_resend_at FROM auth_two_factor_challenges
-         WHERE user_id = ? AND consumed_at IS NULL AND attempts < max_attempts AND expires_at > ?
+         WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?
          ORDER BY created_at DESC LIMIT 1",
     )
     .bind(user_id)

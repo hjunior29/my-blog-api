@@ -44,13 +44,37 @@ impl LoginRateLimiter {
     }
 }
 
-pub fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = forwarded.split(',').next() {
-            let trimmed = first.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
+pub struct ClientIp(pub Option<std::net::SocketAddr>);
+
+impl<S> axum::extract::FromRequestParts<S> for ClientIp
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let addr = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|ci| ci.0);
+        Ok(ClientIp(addr))
+    }
+}
+
+pub fn extract_client_ip(headers: &HeaderMap, peer_addr: Option<std::net::SocketAddr>) -> String {
+    if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
+        let trimmed = fly_ip.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Some(cf_ip) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
+        let trimmed = cf_ip.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
     if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
@@ -59,11 +83,16 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
             return trimmed.to_string();
         }
     }
-    if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
-        let trimmed = fly_ip.trim();
+    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
+        && let Some(last) = forwarded.rsplit(',').next()
+    {
+        let trimmed = last.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
+    }
+    if let Some(addr) = peer_addr {
+        return addr.ip().to_string();
     }
     "127.0.0.1".to_string()
 }
@@ -72,6 +101,7 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     #[test]
     fn allows_up_to_max_attempts_and_enforces_retry_after() {
@@ -110,17 +140,27 @@ mod tests {
     #[test]
     fn extracts_ip_from_various_headers() {
         let mut headers = HeaderMap::new();
-        assert_eq!(extract_client_ip(&headers), "127.0.0.1");
+        assert_eq!(extract_client_ip(&headers, None), "127.0.0.1");
 
-        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.195, 70.41.3.18"));
-        assert_eq!(extract_client_ip(&headers), "203.0.113.195");
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 88)), 4321);
+        assert_eq!(extract_client_ip(&headers, Some(peer)), "192.0.2.88");
+
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("spoofed_attacker_ip, 203.0.113.195"),
+        );
+        assert_eq!(extract_client_ip(&headers, None), "203.0.113.195");
 
         let mut real_headers = HeaderMap::new();
         real_headers.insert("x-real-ip", HeaderValue::from_static("198.51.100.42"));
-        assert_eq!(extract_client_ip(&real_headers), "198.51.100.42");
+        assert_eq!(extract_client_ip(&real_headers, None), "198.51.100.42");
 
         let mut fly_headers = HeaderMap::new();
         fly_headers.insert("fly-client-ip", HeaderValue::from_static("198.51.100.77"));
-        assert_eq!(extract_client_ip(&fly_headers), "198.51.100.77");
+        assert_eq!(extract_client_ip(&fly_headers, None), "198.51.100.77");
+
+        let mut cf_headers = HeaderMap::new();
+        cf_headers.insert("cf-connecting-ip", HeaderValue::from_static("198.51.100.99"));
+        assert_eq!(extract_client_ip(&cf_headers, None), "198.51.100.99");
     }
 }

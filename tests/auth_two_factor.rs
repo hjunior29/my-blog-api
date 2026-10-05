@@ -323,3 +323,63 @@ async fn two_factor_login_cooldown_prevents_duplicate_challenges() {
     let body = json_body(res2).await;
     assert_eq!(body["error"]["code"], "cooldown_active");
 }
+
+#[tokio::test]
+async fn two_factor_locked_challenge_still_enforces_cooldown() {
+    let (pool, _, app, _dir) = test_app().await;
+    user_service::seed_owner(&pool, "locked_cooldown@example.com", "Owner", "ValidOwnerPass123!")
+        .await
+        .unwrap();
+
+    let payload = serde_json::to_vec(&LoginRequest {
+        email: "locked_cooldown@example.com".into(),
+        password: "ValidOwnerPass123!".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload.clone()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    let challenge_token = body["challenge_token"].as_str().unwrap().to_string();
+
+    for _ in 0..5 {
+        let wrong_payload = serde_json::to_vec(&VerifyTwoFactorRequest {
+            challenge_token: challenge_token.clone(),
+            code: "000000".into(),
+            remember_me: None,
+        })
+        .unwrap();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/2fa/verify")
+            .header(header::ORIGIN, "http://localhost:3000")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(wrong_payload))
+            .unwrap();
+
+        let _ = app.clone().oneshot(req).await.unwrap();
+    }
+
+    let req_after_lockout = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+
+    let res_locked = app.oneshot(req_after_lockout).await.unwrap();
+    assert_eq!(res_locked.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = json_body(res_locked).await;
+    assert_eq!(body["error"]["code"], "cooldown_active");
+}

@@ -358,3 +358,57 @@ async fn logout_all_revokes_every_session_of_user() {
     let refresh2_res = app.oneshot(refresh2_req).await.unwrap();
     assert_eq!(refresh2_res.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn logout_with_invalid_csrf_still_clears_cookies() {
+    let (pool, _, app, _dir) = test_app().await;
+    user_service::seed_owner(&pool, "csrf_logout@example.com", "Owner", "ValidOwnerPass123!")
+        .await
+        .unwrap();
+
+    let login_payload = serde_json::to_vec(&LoginRequest {
+        email: "csrf_logout@example.com".into(),
+        password: "ValidOwnerPass123!".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    let login_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(login_payload))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let cookies = extract_set_cookies(&login_res);
+    let access_token = cookies.get("blog_access").unwrap();
+
+    let logout_bad_csrf = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/logout")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header(header::COOKIE, format!("blog_access={access_token}"))
+        .header("x-csrf-token", "invalid-csrf-token")
+        .body(Body::empty())
+        .unwrap();
+
+    let logout_res = app.oneshot(logout_bad_csrf).await.unwrap();
+    assert_eq!(logout_res.status(), StatusCode::FORBIDDEN);
+
+    let clear_cookies = extract_set_cookies(&logout_res);
+    assert_eq!(
+        clear_cookies.get("blog_access").map(String::as_str),
+        Some("")
+    );
+    assert_eq!(
+        clear_cookies.get("blog_refresh").map(String::as_str),
+        Some("")
+    );
+}

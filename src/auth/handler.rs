@@ -30,41 +30,46 @@ pub async fn login(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
     State(rate_limiter): State<super::rate_limit::LoginRateLimiter>,
+    client_ip: super::rate_limit::ClientIp,
     headers: HeaderMap,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {
     let now = current_unix_time();
-    let client_ip = super::rate_limit::extract_client_ip(&headers);
+    let ip = super::rate_limit::extract_client_ip(&headers, client_ip.0);
 
-    if let Err(retry_after) = rate_limiter.check_and_record(&client_ip, now) {
+    if let Err(retry_after) = rate_limiter.check_and_record(&ip, now) {
         return Err(ApiError::too_many_requests(Some(retry_after as u64)));
     }
 
     let normalized = match normalize_email(&payload.email) {
         Ok(e) => e,
-        Err(_) => {
-            let _ = password::dummy_verify(payload.password).await;
-            return Err(ApiError::invalid_credentials());
-        }
+        Err(_) => match password::dummy_verify(payload.password).await {
+            Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
+            _ => return Err(ApiError::invalid_credentials()),
+        },
     };
 
     let user = match repository::find_by_normalized_email(&pool, &normalized).await {
         Ok(Some(u)) => u,
-        Ok(None) => {
-            let _ = password::dummy_verify(payload.password).await;
-            return Err(ApiError::invalid_credentials());
-        }
+        Ok(None) => match password::dummy_verify(payload.password).await {
+            Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
+            _ => return Err(ApiError::invalid_credentials()),
+        },
         Err(_) => return Err(ApiError::internal()),
     };
 
     if user.status != UserStatus::Active || (config.owner_only && user.role != UserRole::Owner) {
-        let _ = password::dummy_verify(payload.password).await;
-        return Err(ApiError::invalid_credentials());
+        match password::dummy_verify(payload.password).await {
+            Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
+            _ => return Err(ApiError::invalid_credentials()),
+        }
     }
 
-    let is_valid = password::verify_password(payload.password, user.password_hash.clone())
-        .await
-        .map_err(|_| ApiError::internal())?;
+    let is_valid = match password::verify_password(payload.password, user.password_hash.clone()).await {
+        Ok(valid) => valid,
+        Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
+        Err(_) => return Err(ApiError::internal()),
+    };
 
     if !is_valid {
         return Err(ApiError::invalid_credentials());
@@ -293,7 +298,12 @@ pub async fn logout(
     let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
 
     if let Ok(auth_user) = auth {
-        verify_csrf(&headers, &auth_user.session.csrf_token)?;
+        if let Err(csrf_err) = verify_csrf(&headers, &auth_user.session.csrf_token) {
+            let mut response = csrf_err.into_response();
+            response.headers_mut().append(header::SET_COOKIE, clear_access);
+            response.headers_mut().append(header::SET_COOKIE, clear_refresh);
+            return Ok(response);
+        }
         session::revoke_session(&pool, &auth_user.session.id, now)
             .await
             .map_err(|_| ApiError::unavailable())?;
@@ -301,19 +311,26 @@ pub async fn logout(
         let refresh_name = refresh_cookie_name(config.secure_cookies);
         if let Some(raw_refresh) = cookie::extract_cookie(&headers, refresh_name) {
             let token_hash = session::hash_token(&raw_refresh);
-            let query_res = sqlx::query_as::<_, session::RefreshTokenRow>(
+            let record = sqlx::query_as::<_, session::RefreshTokenRow>(
                 "SELECT token_hash, session_id, created_at, expires_at, consumed_at, replaced_by_hash
                  FROM refresh_tokens WHERE token_hash = ?",
             )
             .bind(&token_hash)
             .fetch_optional(&pool)
-            .await.map_err(|_| ApiError::unavailable())?;
-            if let Some(record) = query_res
+            .await
+            .map_err(|_| ApiError::unavailable())?;
+
+            if let Some(record) = record
                 && let Some(s) = session::find_active_session(&pool, &record.session_id, now)
                     .await
                     .map_err(|_| ApiError::unavailable())?
             {
-                verify_csrf(&headers, &s.csrf_token)?;
+                if let Err(csrf_err) = verify_csrf(&headers, &s.csrf_token) {
+                    let mut response = csrf_err.into_response();
+                    response.headers_mut().append(header::SET_COOKIE, clear_access);
+                    response.headers_mut().append(header::SET_COOKIE, clear_refresh);
+                    return Ok(response);
+                }
                 session::revoke_session(&pool, &record.session_id, now)
                     .await
                     .map_err(|_| ApiError::unavailable())?;
@@ -342,14 +359,19 @@ pub async fn logout_all(
     auth: AuthenticatedUser,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
+    if let Err(csrf_err) = verify_csrf(&headers, &auth.session.csrf_token) {
+        let mut response = csrf_err.into_response();
+        response.headers_mut().append(header::SET_COOKIE, clear_access);
+        response.headers_mut().append(header::SET_COOKIE, clear_refresh);
+        return Ok(response);
+    }
     let now = current_unix_time();
 
     session::revoke_all_user_sessions(&pool, auth.user.id, now)
         .await
-        .map_err(|_| ApiError::internal())?;
+        .map_err(|_| ApiError::unavailable())?;
 
-    let (clear_access, clear_refresh) = cookie::build_clear_auth_cookies(&config);
     let mut response = StatusCode::NO_CONTENT.into_response();
     response
         .headers_mut()
