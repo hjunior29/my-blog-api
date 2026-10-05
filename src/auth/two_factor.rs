@@ -12,6 +12,8 @@ pub const MAX_RESENDS: i64 = 3;
 
 #[derive(Debug, Error)]
 pub enum TwoFactorError {
+    #[error("challenge cooldown active; retry in {retry_after} seconds")]
+    CooldownActive { retry_after: i64 },
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 }
@@ -87,6 +89,25 @@ pub async fn create_challenge(
     remember_me: bool,
     now: i64,
 ) -> Result<(String, String), TwoFactorError> {
+    let active_row: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT created_at, last_resend_at FROM auth_two_factor_challenges
+         WHERE user_id = ? AND consumed_at IS NULL AND attempts < max_attempts AND expires_at > ?
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(now)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some((created_at, last_resend_at)) = active_row {
+        let last_activity = created_at.max(last_resend_at);
+        let elapsed = now - last_activity;
+        if elapsed < RESEND_COOLDOWN_SECS {
+            let retry_after = RESEND_COOLDOWN_SECS - elapsed;
+            return Err(TwoFactorError::CooldownActive { retry_after });
+        }
+    }
+
     sqlx::query("UPDATE auth_two_factor_challenges SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL")
         .bind(now)
         .bind(user_id)

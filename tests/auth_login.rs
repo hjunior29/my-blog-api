@@ -187,3 +187,95 @@ async fn state_mutations_reject_untrusted_origins() {
     let res3 = app.oneshot(cross_site).await.unwrap();
     assert_eq!(res3.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn login_rate_limiting_blocks_after_max_attempts() {
+    let (pool, _, app, _dir) = test_app().await;
+    user_service::seed_owner(&pool, "rate@example.com", "Owner", "ValidOwnerPass123!")
+        .await
+        .unwrap();
+
+    let attacker_ip = "198.51.100.50";
+    let different_ip = "198.51.100.51";
+
+    let wrong_payload = serde_json::to_vec(&LoginRequest {
+        email: "rate@example.com".into(),
+        password: "WrongPassword123!".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    for _ in 0..10 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header(header::ORIGIN, "http://localhost:3000")
+            .header("x-forwarded-for", attacker_ip)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(wrong_payload.clone()))
+            .unwrap();
+
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    let req_blocked = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header("x-forwarded-for", attacker_ip)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(wrong_payload.clone()))
+        .unwrap();
+
+    let res_blocked = app.clone().oneshot(req_blocked).await.unwrap();
+    assert_eq!(res_blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(res_blocked.headers().contains_key(header::RETRY_AFTER));
+    let body = json_body(res_blocked).await;
+    assert_eq!(body["error"]["code"], "rate_limit_exceeded");
+
+    let req_other = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header("x-forwarded-for", different_ip)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(wrong_payload))
+        .unwrap();
+
+    let res_other = app.oneshot(req_other).await.unwrap();
+    assert_eq!(res_other.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn hsts_header_present_in_production_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("prod_test.db");
+    let url = format!("sqlite://{}", db_path.display());
+    let pool = database::connect(&url, 4).await.unwrap();
+
+    let config = Config::from_lookup(|key| match key {
+        "OWNER_ONLY" => Ok(Some("false".into())),
+        "APP_ENV" => Ok(Some("production".into())),
+        "APP_ORIGIN" => Ok(Some("https://blog.example.com".into())),
+        "SECURE_COOKIES" => Ok(Some("true".into())),
+        "JWT_SECRET" => Ok(Some("production-secret-must-be-very-long-and-secure!".into())),
+        _ => Ok(None),
+    })
+    .unwrap();
+
+    let app = router_with_config(pool, config);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::STRICT_TRANSPORT_SECURITY).unwrap(),
+        "max-age=63072000; includeSubDomains; preload"
+    );
+}

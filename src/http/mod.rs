@@ -24,6 +24,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub config: Config,
     pub storage: crate::media::StorageBackend,
+    pub rate_limiter: crate::auth::LoginRateLimiter,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -44,6 +45,12 @@ impl axum::extract::FromRef<AppState> for crate::media::StorageBackend {
     }
 }
 
+impl axum::extract::FromRef<AppState> for crate::auth::LoginRateLimiter {
+    fn from_ref(state: &AppState) -> Self {
+        state.rate_limiter.clone()
+    }
+}
+
 pub const ROOT_BODY_LIMIT_BYTES: usize = 384 * 1024;
 
 pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
@@ -52,6 +59,7 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
         pool,
         config: config.clone(),
         storage,
+        rate_limiter: crate::auth::LoginRateLimiter::default(),
     };
 
     let origin_check_layer =
@@ -84,7 +92,7 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
         })
         .layer(DefaultBodyLimit::max(ROOT_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn(request_timeout))
-        .layer(middleware::from_fn(security_headers))
+        .layer(middleware::from_fn_with_state(config.clone(), security_headers))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -94,7 +102,11 @@ pub fn router(pool: SqlitePool) -> Router {
     router_with_config(pool, config)
 }
 
-async fn security_headers(request: Request, next: Next) -> Response {
+async fn security_headers(
+    axum::extract::State(config): axum::extract::State<Config>,
+    request: Request,
+    next: Next,
+) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -109,6 +121,12 @@ async fn security_headers(request: Request, next: Next) -> Response {
         axum::http::header::REFERRER_POLICY,
         axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
+    if config.env == crate::config::AppEnv::Production {
+        headers.insert(
+            axum::http::header::STRICT_TRANSPORT_SECURITY,
+            axum::http::HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
+        );
+    }
     response
 }
 

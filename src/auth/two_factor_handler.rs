@@ -136,36 +136,44 @@ pub async fn resend_two_factor(
     Json(payload): Json<ResendTwoFactorRequest>,
 ) -> Result<Response, ApiError> {
     let now = current_unix_time();
-    let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
 
-    let (challenge_token, new_code, user_id) =
-        match two_factor::resend_challenge(&mut conn, &payload.challenge_token, now).await {
-            Ok(res) => res,
-            Err(TwoFactorResendError::InvalidChallenge) => {
-                return Err(ApiError::bad_request(
-                    "invalid_challenge",
-                    "Challenge is invalid or has expired",
-                ));
-            }
-            Err(TwoFactorResendError::CooldownActive { retry_after: _ }) => {
-                return Err(ApiError::new(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "cooldown_active",
-                    "Please wait before requesting a new verification code",
-                ));
-            }
-            Err(TwoFactorResendError::MaxResendsExceeded) => {
-                return Err(ApiError::bad_request(
-                    "max_resends_exceeded",
-                    "Maximum resend limit reached. Please login again.",
-                ));
-            }
-            Err(TwoFactorResendError::Database) => return Err(ApiError::internal()),
+    let (challenge_token, new_code, user) = {
+        let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
+        let (token, code, user_id) =
+            match two_factor::resend_challenge(&mut conn, &payload.challenge_token, now).await {
+                Ok(res) => res,
+                Err(TwoFactorResendError::InvalidChallenge) => {
+                    return Err(ApiError::bad_request(
+                        "invalid_challenge",
+                        "Challenge is invalid or has expired",
+                    ));
+                }
+                Err(TwoFactorResendError::CooldownActive { retry_after }) => {
+                    return Err(ApiError::new(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "cooldown_active",
+                        "Please wait before requesting a new verification code",
+                    )
+                    .with_header(
+                        header::RETRY_AFTER,
+                        header::HeaderValue::from(retry_after as u64),
+                    ));
+                }
+                Err(TwoFactorResendError::MaxResendsExceeded) => {
+                    return Err(ApiError::bad_request(
+                        "max_resends_exceeded",
+                        "Maximum resend limit reached. Please login again.",
+                    ));
+                }
+                Err(TwoFactorResendError::Database) => return Err(ApiError::internal()),
+            };
+
+        let user = match repository::find_by_id(&pool, user_id).await {
+            Ok(Some(u)) => u,
+            _ => return Err(ApiError::unauthorized("User not found")),
         };
 
-    let user = match repository::find_by_id(&pool, user_id).await {
-        Ok(Some(u)) => u,
-        _ => return Err(ApiError::unauthorized("User not found")),
+        (token, code, user)
     };
 
     let email_service = EmailService::new(config.clone());

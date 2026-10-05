@@ -283,3 +283,43 @@ async fn two_factor_lockout_after_max_attempts() {
     let body = json_body(res).await;
     assert_eq!(body["error"]["code"], "too_many_attempts");
 }
+
+#[tokio::test]
+async fn two_factor_login_cooldown_prevents_duplicate_challenges() {
+    let (pool, _, app, _dir) = test_app().await;
+    user_service::seed_owner(&pool, "cooldown@example.com", "Owner", "ValidOwnerPass123!")
+        .await
+        .unwrap();
+
+    let payload = serde_json::to_vec(&LoginRequest {
+        email: "cooldown@example.com".into(),
+        password: "ValidOwnerPass123!".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    let req1 = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload.clone()))
+        .unwrap();
+
+    let res1 = app.clone().oneshot(req1).await.unwrap();
+    assert_eq!(res1.status(), StatusCode::OK);
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(res2.headers().contains_key(header::RETRY_AFTER));
+    let body = json_body(res2).await;
+    assert_eq!(body["error"]["code"], "cooldown_active");
+}

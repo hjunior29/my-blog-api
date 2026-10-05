@@ -29,9 +29,17 @@ use crate::{
 pub async fn login(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
+    State(rate_limiter): State<super::rate_limit::LoginRateLimiter>,
     headers: HeaderMap,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {
+    let now = current_unix_time();
+    let client_ip = super::rate_limit::extract_client_ip(&headers);
+
+    if let Err(retry_after) = rate_limiter.check_and_record(&client_ip, now) {
+        return Err(ApiError::too_many_requests(Some(retry_after as u64)));
+    }
+
     let normalized = match normalize_email(&payload.email) {
         Ok(e) => e,
         Err(_) => {
@@ -68,9 +76,21 @@ pub async fn login(
     if config.two_factor_enabled {
         let (challenge_token, code) = {
             let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
-            two_factor::create_challenge(&mut conn, user.id, remember_me, now)
-                .await
-                .map_err(|_| ApiError::internal())?
+            match two_factor::create_challenge(&mut conn, user.id, remember_me, now).await {
+                Ok(pair) => pair,
+                Err(two_factor::TwoFactorError::CooldownActive { retry_after }) => {
+                    return Err(ApiError::new(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "cooldown_active",
+                        "Please wait before requesting a new verification code",
+                    )
+                    .with_header(
+                        header::RETRY_AFTER,
+                        header::HeaderValue::from(retry_after as u64),
+                    ));
+                }
+                Err(two_factor::TwoFactorError::Database(_)) => return Err(ApiError::internal()),
+            }
         };
 
         let email_service = EmailService::new(config.clone());
