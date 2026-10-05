@@ -34,7 +34,12 @@ pub async fn search_posts(
 ) -> Result<Response, ApiError> {
     let result = service::search_published_posts(&pool, &query.q, query.limit, query.offset)
         .await
-        .map_err(|_| ApiError::internal())?;
+        .map_err(|err| match err {
+            PostServiceError::SearchQueryTooLong => {
+                ApiError::bad_request("invalid_search_query", "Search query must not exceed 100 characters")
+            }
+            _ => ApiError::internal(),
+        })?;
 
     let mut response = (StatusCode::OK, Json(result)).into_response();
     response.headers_mut().insert(

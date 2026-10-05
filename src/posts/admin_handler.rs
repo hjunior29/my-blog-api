@@ -73,6 +73,10 @@ fn map_service_error(err: PostServiceError) -> ApiError {
         PostServiceError::VersionConflict => {
             ApiError::precondition_failed("Resource version mismatch")
         }
+        PostServiceError::SearchQueryTooLong => ApiError::bad_request(
+            "invalid_search_query",
+            "Search query must not exceed 100 characters",
+        ),
         PostServiceError::Database(_) => ApiError::internal(),
     }
 }

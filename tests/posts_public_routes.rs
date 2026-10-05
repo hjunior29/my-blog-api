@@ -278,3 +278,20 @@ async fn list_tags_only_returns_tags_from_published_posts() {
     assert_eq!(tags[0]["name"], "PublicTag");
     assert_eq!(tags[0]["post_count"], 1);
 }
+
+#[tokio::test]
+async fn search_posts_rejects_query_exceeding_100_characters() {
+    let (_pool, app, _author_id, _dir) = test_app().await;
+
+    let long_query = "a".repeat(101);
+    let req = Request::builder()
+        .uri(format!("/api/v1/posts/search?q={}", long_query))
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = json_body(res).await;
+    assert_eq!(body["error"]["code"], "invalid_search_query");
+}

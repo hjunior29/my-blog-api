@@ -306,3 +306,95 @@ async fn lifecycle_enforces_if_match_and_updates_version() {
         .unwrap();
     assert_eq!(delete_ok.status(), StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn publishing_draft_with_empty_content_is_rejected() {
+    let (pool, app, _dir) = test_app().await;
+
+    user_service::create_user(
+        &pool,
+        "author_draft@example.com",
+        "Author",
+        "ValidPassword123!",
+        UserRole::Author,
+    )
+    .await
+    .unwrap();
+
+    let (access, csrf) = login_user(&app, "author_draft@example.com", "ValidPassword123!").await;
+
+    let create_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/admin/posts")
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::COOKIE, format!("blog_access={}", access))
+                .header("x-csrf-token", &csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&CreatePostDto {
+                        title: "Valid Post For Draft".into(),
+                        summary: Some("Valid summary".into()),
+                        content_md: "Some initial content".into(),
+                        featured_image_media_id: None,
+                        status: None,
+                        tags: None,
+                        scheduled_for: None,
+                        book_color: None,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let post_json = json_body(create_res).await;
+    let post_id = post_json["id"].as_i64().unwrap();
+
+    let save_draft_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/api/v1/admin/posts/{}/draft", post_id))
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::COOKIE, format!("blog_access={}", access))
+                .header("x-csrf-token", &csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "title": "Draft Title",
+                        "summary": "Draft summary",
+                        "content_md": "   ",
+                        "tags": []
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_draft_res.status(), StatusCode::OK);
+
+    let publish_res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/admin/posts/{}/publish", post_id))
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::COOKIE, format!("blog_access={}", access))
+                .header("x-csrf-token", &csrf)
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(publish_res.status(), StatusCode::BAD_REQUEST);
+    let err_body = json_body(publish_res).await;
+    assert_eq!(err_body["error"]["code"], "empty_content");
+}

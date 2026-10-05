@@ -7,8 +7,8 @@ use super::{
     repository::{self, NewPostRecord, UpdatePostRecord},
     slug,
     validation::{
-        current_unix_time, normalize_tags, sanitize_fts_query, validate_content, validate_summary,
-        validate_title,
+        current_unix_time, normalize_tags, sanitize_fts_query, validate_content,
+        validate_search_query, validate_summary, validate_title,
     },
 };
 
@@ -263,7 +263,8 @@ pub async fn search_published_posts(
     let limit = limit.unwrap_or(20).clamp(1, 50);
     let offset = offset.unwrap_or(0).max(0);
 
-    let sanitized = sanitize_fts_query(raw_query);
+    let trimmed = validate_search_query(raw_query)?;
+    let sanitized = sanitize_fts_query(trimmed);
     if sanitized.is_empty() {
         return Ok(PostListResponse {
             items: Vec::new(),
@@ -273,7 +274,7 @@ pub async fn search_published_posts(
         });
     }
 
-    let clean_like = raw_query.trim().replace(['%', '_'], "");
+    let clean_like = trimmed.replace(['%', '_'], "");
     let like_query = format!("%{}%", clean_like);
     let total = repository::count_search_published_fts(pool, &sanitized, &like_query).await?;
     let posts = repository::search_published_fts(pool, &sanitized, &like_query, limit, offset).await?;

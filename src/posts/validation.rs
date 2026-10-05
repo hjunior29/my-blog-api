@@ -23,6 +23,8 @@ pub enum PostServiceError {
     SlugCollision,
     #[error("version conflict: post was modified by another request")]
     VersionConflict,
+    #[error("search query must not exceed 100 characters")]
+    SearchQueryTooLong,
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 }
@@ -99,4 +101,29 @@ pub fn sanitize_fts_query(raw: &str) -> String {
         })
         .collect();
     words.join(" ")
+}
+
+pub fn validate_search_query(q: &str) -> Result<&str, PostServiceError> {
+    let trimmed = q.trim();
+    if trimmed.chars().count() > 100 {
+        return Err(PostServiceError::SearchQueryTooLong);
+    }
+    Ok(trimmed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_search_query_length() {
+        assert!(validate_search_query("rust async").is_ok());
+        let exact_100 = "a".repeat(100);
+        assert!(validate_search_query(&exact_100).is_ok());
+        let too_long = "a".repeat(101);
+        assert!(matches!(
+            validate_search_query(&too_long),
+            Err(PostServiceError::SearchQueryTooLong)
+        ));
+    }
 }

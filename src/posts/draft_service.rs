@@ -7,7 +7,8 @@ use super::{
     repository::{self, UpdatePostRecord},
     slug,
     validation::{
-        current_unix_time, normalize_tags, validate_summary, validate_title, PostServiceError,
+        current_unix_time, normalize_tags, validate_content, validate_summary, validate_title,
+        PostServiceError,
     },
 };
 
@@ -150,8 +151,12 @@ pub async fn try_publish_draft(
     if existing.version != version {
         return Err(PostServiceError::VersionConflict);
     }
+    validate_title(&draft.title)?;
+    validate_summary(&draft.summary)?;
+    validate_content(&draft.content_md, PostStatus::Published)?;
     let now = current_unix_time();
     let tags: Vec<String> = serde_json::from_str(&draft.tags).unwrap_or_default();
+    let clean_tags = normalize_tags(&tags)?;
     let mut tx = pool.begin().await?;
     let record = UpdatePostRecord {
         id,
@@ -171,8 +176,8 @@ pub async fn try_publish_draft(
     if !updated {
         return Err(PostServiceError::VersionConflict);
     }
-    let mut tag_ids = Vec::with_capacity(tags.len());
-    for tag_name in &tags {
+    let mut tag_ids = Vec::with_capacity(clean_tags.len());
+    for tag_name in &clean_tags {
         let tag_slug = slug::generate_slug(tag_name);
         let tag = repository::find_or_create_tag(&mut tx, tag_name, &tag_slug, now).await?;
         tag_ids.push(tag.id);
