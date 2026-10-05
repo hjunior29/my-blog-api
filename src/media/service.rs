@@ -44,11 +44,30 @@ pub fn sanitize_filename(filename: &str) -> String {
     }
 }
 
+const ALLOWED_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov", "mp3", "ogg", "wav", "m4a",
+];
+
+fn validate_magic_bytes(data: &[u8], content_type: &str) -> bool {
+    match content_type {
+        "image/png" => data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+        "image/jpeg" => data.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "image/gif" => data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a"),
+        "image/webp" => data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP",
+        _ => true,
+    }
+}
+
 pub fn detect_media_kind(filename: &str, content_type: &str) -> Result<(MediaKind, String), MediaServiceError> {
     let lower = filename.to_ascii_lowercase();
     let lower_ct = content_type.to_ascii_lowercase();
     if lower.ends_with(".svg") || lower_ct == "image/svg+xml" || lower_ct.contains("svg") {
         return Err(MediaServiceError::UnsupportedMediaType("SVG images are not permitted".to_string()));
+    }
+
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    if !ALLOWED_EXTENSIONS.contains(&ext) {
+        return Err(MediaServiceError::UnsupportedMediaType("File extension is not permitted".to_string()));
     }
 
     if let Some(kind) = MediaKind::from_content_type(content_type) {
@@ -90,11 +109,15 @@ pub async fn upload_media(
     content_type: &str,
     data: &[u8],
 ) -> Result<MediaResponse, MediaServiceError> {
-    if data.is_empty() {
+    if data.len() < 4 {
         return Err(MediaServiceError::EmptyFile);
     }
 
     let (kind, resolved_content_type) = detect_media_kind(filename, content_type)?;
+
+    if !validate_magic_bytes(data, &resolved_content_type) {
+        return Err(MediaServiceError::UnsupportedMediaType("File signature does not match declared type".to_string()));
+    }
 
     let check_len = data.len().min(1024);
     let lower_preview = String::from_utf8_lossy(&data[..check_len]).to_ascii_lowercase();

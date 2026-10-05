@@ -84,6 +84,7 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
         })
         .layer(DefaultBodyLimit::max(ROOT_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn(request_timeout))
+        .layer(middleware::from_fn(security_headers))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -91,6 +92,24 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
 pub fn router(pool: SqlitePool) -> Router {
     let config = Config::from_lookup(|_| Ok(None)).expect("default test config");
     router_with_config(pool, config)
+}
+
+async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        axum::http::header::X_FRAME_OPTIONS,
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        axum::http::header::REFERRER_POLICY,
+        axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    response
 }
 
 async fn request_timeout(request: Request, next: Next) -> Response {

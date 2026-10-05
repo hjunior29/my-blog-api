@@ -66,10 +66,12 @@ pub async fn login(
     let remember_me = payload.remember_me.unwrap_or(false);
 
     if config.two_factor_enabled {
-        let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
-        let (challenge_token, code) = two_factor::create_challenge(&mut conn, user.id, remember_me, now)
-            .await
-            .map_err(|_| ApiError::internal())?;
+        let (challenge_token, code) = {
+            let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
+            two_factor::create_challenge(&mut conn, user.id, remember_me, now)
+                .await
+                .map_err(|_| ApiError::internal())?
+        };
 
         let email_service = EmailService::new(config.clone());
         email_service
