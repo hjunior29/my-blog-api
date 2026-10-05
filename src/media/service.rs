@@ -54,7 +54,22 @@ fn validate_magic_bytes(data: &[u8], content_type: &str) -> bool {
         "image/jpeg" => data.starts_with(&[0xFF, 0xD8, 0xFF]),
         "image/gif" => data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a"),
         "image/webp" => data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP",
-        _ => true,
+        "video/mp4" | "audio/mp4" => data.len() >= 8 && &data[4..8] == b"ftyp",
+        "video/quicktime" => {
+            data.len() >= 8
+                && (&data[4..8] == b"ftyp"
+                    || &data[4..8] == b"moov"
+                    || &data[4..8] == b"mdat"
+                    || &data[4..8] == b"wide")
+        }
+        "video/webm" => data.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        "audio/ogg" => data.starts_with(b"OggS"),
+        "audio/wav" => data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE",
+        "audio/mpeg" => {
+            data.starts_with(b"ID3")
+                || (data.len() >= 2 && data[0] == 0xFF && (data[1] & 0xE0) == 0xE0)
+        }
+        _ => false,
     }
 }
 

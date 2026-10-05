@@ -192,7 +192,13 @@ async fn upload_image_video_and_audio_succeeds() {
         "image/png"
     );
 
-    let vid_body = create_multipart_body(boundary, "file", "clip.mp4", "video/mp4", b"fake mp4 video bytes");
+    let vid_body = create_multipart_body(
+        boundary,
+        "file",
+        "clip.mp4",
+        "video/mp4",
+        b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00fake mp4 video bytes",
+    );
     let vid_req = Request::post("/api/v1/admin/media")
         .header(
             header::CONTENT_TYPE,
@@ -210,7 +216,13 @@ async fn upload_image_video_and_audio_succeeds() {
     assert_eq!(vid_json["media_kind"], "video");
     assert_eq!(vid_json["content_type"], "video/mp4");
 
-    let audio_body = create_multipart_body(boundary, "file", "podcast.mp3", "audio/mpeg", b"fake mp3 audio bytes");
+    let audio_body = create_multipart_body(
+        boundary,
+        "file",
+        "podcast.mp3",
+        "audio/mpeg",
+        b"ID3\x03\x00\x00\x00\x00\x00\x00fake mp3 audio bytes",
+    );
     let audio_req = Request::post("/api/v1/admin/media")
         .header(
             header::CONTENT_TYPE,
@@ -276,6 +288,21 @@ async fn rejects_unsupported_media_formats() {
         .body(Body::from(exe_body))
         .unwrap();
 
-    let res = app.oneshot(req).await.unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    let spoofed_mp4_body = create_multipart_body(boundary, "file", "fake.mp4", "video/mp4", b"not a real mp4 video");
+    let spoofed_mp4_req = Request::post("/api/v1/admin/media")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header(header::COOKIE, format!("blog_access={access}"))
+        .header("x-csrf-token", &csrf)
+        .header(header::ORIGIN, "http://localhost:3000")
+        .body(Body::from(spoofed_mp4_body))
+        .unwrap();
+
+    let spoofed_mp4_res = app.oneshot(spoofed_mp4_req).await.unwrap();
+    assert_eq!(spoofed_mp4_res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
