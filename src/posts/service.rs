@@ -1,7 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use sqlx::SqlitePool;
-use thiserror::Error;
 
 use super::{
     dto::{CreatePostDto, PostListResponse, PostSummaryResponse, UpdatePostDto},
@@ -9,105 +6,13 @@ use super::{
     model::{PostStatus, PostWithTags},
     repository::{self, NewPostRecord, UpdatePostRecord},
     slug,
+    validation::{
+        current_unix_time, normalize_tags, sanitize_fts_query, validate_content, validate_summary,
+        validate_title,
+    },
 };
 
-#[derive(Debug, Error)]
-pub enum PostServiceError {
-    #[error("title must be between 1 and 160 characters")]
-    InvalidTitle,
-    #[error("summary must be at most 320 characters")]
-    InvalidSummary,
-    #[error("content exceeds maximum allowed size of 256 KiB")]
-    ContentTooLarge,
-    #[error("content cannot be empty when publishing")]
-    EmptyContentWhenPublished,
-    #[error("post can have at most 10 tags")]
-    TooManyTags,
-    #[error("tag name must be between 1 and 40 characters")]
-    InvalidTagName,
-    #[error("post not found")]
-    PostNotFound,
-    #[error("slug collision: could not allocate unique slug")]
-    SlugCollision,
-    #[error("version conflict: post was modified by another request")]
-    VersionConflict,
-    #[error("database error: {0}")]
-    Database(#[from] sqlx::Error),
-}
-
-pub fn current_unix_time() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-pub fn validate_title(title: &str) -> Result<&str, PostServiceError> {
-    let trimmed = title.trim();
-    let char_count = trimmed.chars().count();
-    if char_count == 0 || char_count > 160 {
-        return Err(PostServiceError::InvalidTitle);
-    }
-    Ok(trimmed)
-}
-
-pub fn validate_summary(summary: &str) -> Result<&str, PostServiceError> {
-    let trimmed = summary.trim();
-    if trimmed.chars().count() > 320 {
-        return Err(PostServiceError::InvalidSummary);
-    }
-    Ok(trimmed)
-}
-
-pub fn validate_content(content: &str, status: PostStatus) -> Result<(), PostServiceError> {
-    if content.len() > 256 * 1024 {
-        return Err(PostServiceError::ContentTooLarge);
-    }
-    if status == PostStatus::Published && content.trim().is_empty() {
-        return Err(PostServiceError::EmptyContentWhenPublished);
-    }
-    Ok(())
-}
-
-pub fn normalize_tags(raw_tags: &[String]) -> Result<Vec<String>, PostServiceError> {
-    let mut normalized = Vec::new();
-    for raw in raw_tags {
-        let trimmed = raw.trim();
-        let char_count = trimmed.chars().count();
-        if char_count == 0 || char_count > 40 {
-            return Err(PostServiceError::InvalidTagName);
-        }
-        let lower = trimmed.to_lowercase();
-        if !normalized
-            .iter()
-            .any(|t: &String| t.to_lowercase() == lower)
-        {
-            normalized.push(trimmed.to_string());
-        }
-    }
-    if normalized.len() > 10 {
-        return Err(PostServiceError::TooManyTags);
-    }
-    Ok(normalized)
-}
-
-pub fn sanitize_fts_query(raw: &str) -> String {
-    let words: Vec<String> = raw
-        .split_whitespace()
-        .filter_map(|w| {
-            let sanitized: String = w
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-                .collect();
-            if sanitized.is_empty() {
-                None
-            } else {
-                Some(format!("\"{}\"", sanitized))
-            }
-        })
-        .collect();
-    words.join(" ")
-}
+pub use super::validation::PostServiceError;
 
 pub async fn create_post(
     pool: &SqlitePool,
@@ -164,6 +69,7 @@ pub async fn create_post(
             published_at,
             scheduled_for: dto.scheduled_for,
             now,
+            book_color: dto.book_color.as_deref().map(str::trim).filter(|s| !s.is_empty()),
         };
 
         match repository::insert_post(&mut tx, &record).await {
@@ -231,13 +137,25 @@ pub async fn update_post(
     let published_at = match status {
         PostStatus::Published => existing.published_at.or(Some(now)),
         PostStatus::Archived => existing.published_at,
-        PostStatus::Draft | PostStatus::Scheduled => None,
+        PostStatus::Draft => None,
     };
 
     let featured_image = dto
         .featured_image_media_id
         .as_deref()
         .or(existing.featured_image_media_id.as_deref());
+
+    let book_color = match dto.book_color {
+        Some(ref c) => {
+            let trimmed = c.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        None => existing.book_color.as_deref(),
+    };
 
     let mut tx = pool.begin().await?;
     let record = UpdatePostRecord {
@@ -252,6 +170,7 @@ pub async fn update_post(
         scheduled_for: dto.scheduled_for.or(existing.scheduled_for),
         now,
         expected_version: dto.version,
+        book_color,
     };
 
     let updated = repository::update_post(&mut tx, &record).await?;
@@ -354,8 +273,10 @@ pub async fn search_published_posts(
         });
     }
 
-    let total = repository::count_search_published_fts(pool, &sanitized).await?;
-    let posts = repository::search_published_fts(pool, &sanitized, limit, offset).await?;
+    let clean_like = raw_query.trim().replace(['%', '_'], "");
+    let like_query = format!("%{}%", clean_like);
+    let total = repository::count_search_published_fts(pool, &sanitized, &like_query).await?;
+    let posts = repository::search_published_fts(pool, &sanitized, &like_query, limit, offset).await?;
 
     let mut items = Vec::with_capacity(posts.len());
     for post in posts {
@@ -364,12 +285,7 @@ pub async fn search_published_posts(
         items.push(PostSummaryResponse::from(&pwt));
     }
 
-    Ok(PostListResponse {
-        items,
-        total,
-        limit,
-        offset,
-    })
+    Ok(PostListResponse { items, total, limit, offset })
 }
 
 pub fn preview_markdown(markdown: &str) -> String {
@@ -411,17 +327,13 @@ pub async fn list_admin_posts(
         items.push(PostSummaryResponse::from(&pwt));
     }
 
-    Ok(PostListResponse {
-        items,
-        total,
-        limit,
-        offset,
-    })
+    Ok(PostListResponse { items, total, limit, offset })
 }
 
-pub async fn publish_post(
+async fn update_post_status(
     pool: &SqlitePool,
     id: i64,
+    status: PostStatus,
     expected_version: i64,
 ) -> Result<PostWithTags, PostServiceError> {
     update_post(
@@ -432,35 +344,35 @@ pub async fn publish_post(
             summary: None,
             content_md: None,
             featured_image_media_id: None,
-            status: Some(PostStatus::Published),
+            status: Some(status),
             tags: None,
             scheduled_for: None,
+            book_color: None,
             version: expected_version,
         },
     )
     .await
 }
 
-pub async fn unpublish_post(
-    pool: &SqlitePool,
-    id: i64,
-    expected_version: i64,
-) -> Result<PostWithTags, PostServiceError> {
-    update_post(
-        pool,
-        id,
-        UpdatePostDto {
-            title: None,
-            summary: None,
-            content_md: None,
-            featured_image_media_id: None,
-            status: Some(PostStatus::Draft),
-            tags: None,
-            scheduled_for: None,
-            version: expected_version,
-        },
-    )
-    .await
+pub use super::draft_service::{discard_post_draft, get_admin_post_by_id, save_post_draft};
+
+pub async fn publish_post(pool: &SqlitePool, id: i64, version: i64) -> Result<PostWithTags, PostServiceError> {
+    if let Some(published) = super::draft_service::try_publish_draft(pool, id, version).await? {
+        return Ok(published);
+    }
+    update_post_status(pool, id, PostStatus::Published, version).await
+}
+
+pub async fn unpublish_post(pool: &SqlitePool, id: i64, version: i64) -> Result<PostWithTags, PostServiceError> {
+    update_post_status(pool, id, PostStatus::Draft, version).await
+}
+
+pub async fn archive_post(pool: &SqlitePool, id: i64, version: i64) -> Result<PostWithTags, PostServiceError> {
+    update_post_status(pool, id, PostStatus::Archived, version).await
+}
+
+pub async fn unarchive_post(pool: &SqlitePool, id: i64, version: i64) -> Result<PostWithTags, PostServiceError> {
+    update_post_status(pool, id, PostStatus::Draft, version).await
 }
 
 pub async fn delete_post_versioned(

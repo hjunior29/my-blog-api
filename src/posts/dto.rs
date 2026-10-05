@@ -11,6 +11,7 @@ pub struct CreatePostDto {
     pub status: Option<PostStatus>,
     pub tags: Option<Vec<String>>,
     pub scheduled_for: Option<i64>,
+    pub book_color: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,6 +23,7 @@ pub struct UpdatePostDto {
     pub status: Option<PostStatus>,
     pub tags: Option<Vec<String>>,
     pub scheduled_for: Option<i64>,
+    pub book_color: Option<String>,
     #[serde(default)]
     pub version: i64,
 }
@@ -67,7 +69,10 @@ pub struct PostResponse {
     pub created_at: i64,
     pub updated_at: i64,
     pub version: i64,
+    pub book_color: Option<String>,
     pub tags: Vec<TagDto>,
+    #[serde(default)]
+    pub has_draft: bool,
 }
 
 impl From<&PostWithTags> for PostResponse {
@@ -87,7 +92,9 @@ impl From<&PostWithTags> for PostResponse {
             created_at: pt.post.created_at,
             updated_at: pt.post.updated_at,
             version: pt.post.version,
+            book_color: pt.post.book_color.clone(),
             tags: pt.tags.iter().map(TagDto::from).collect(),
+            has_draft: false,
         }
     }
 }
@@ -105,7 +112,10 @@ pub struct PostSummaryResponse {
     pub created_at: i64,
     pub updated_at: i64,
     pub version: i64,
+    pub book_color: Option<String>,
     pub tags: Vec<TagDto>,
+    #[serde(default)]
+    pub has_draft: bool,
 }
 
 impl From<&PostWithTags> for PostSummaryResponse {
@@ -122,7 +132,9 @@ impl From<&PostWithTags> for PostSummaryResponse {
             created_at: pt.post.created_at,
             updated_at: pt.post.updated_at,
             version: pt.post.version,
+            book_color: pt.post.book_color.clone(),
             tags: pt.tags.iter().map(TagDto::from).collect(),
+            has_draft: false,
         }
     }
 }

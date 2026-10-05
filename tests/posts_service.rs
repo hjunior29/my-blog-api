@@ -45,6 +45,7 @@ async fn creates_post_with_rendered_html_and_tags() {
             "rust".to_string(),
         ]),
         scheduled_for: None,
+        book_color: None,
     };
 
     let result = post_service::create_post(&pool, author_id, dto)
@@ -83,6 +84,7 @@ async fn resolves_slug_collisions_by_appending_numeric_suffix() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -100,6 +102,7 @@ async fn resolves_slug_collisions_by_appending_numeric_suffix() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -117,6 +120,7 @@ async fn resolves_slug_collisions_by_appending_numeric_suffix() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -139,6 +143,7 @@ async fn validates_title_length_and_empty_publishing_content() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await;
@@ -158,6 +163,7 @@ async fn validates_title_length_and_empty_publishing_content() {
             status: Some(PostStatus::Published),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await;
@@ -182,6 +188,7 @@ async fn updates_post_with_optimistic_concurrency_control() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -201,6 +208,7 @@ async fn updates_post_with_optimistic_concurrency_control() {
             status: None,
             tags: None,
             scheduled_for: None,
+            book_color: None,
             version: 99,
         },
     )
@@ -221,6 +229,7 @@ async fn updates_post_with_optimistic_concurrency_control() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["Atualizado".to_string()]),
             scheduled_for: None,
+            book_color: None,
             version: 1,
         },
     )
@@ -256,6 +265,7 @@ async fn fts_search_only_returns_published_posts() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -278,6 +288,7 @@ async fn fts_search_only_returns_published_posts() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["Rust".to_string(), "Backend".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -324,6 +335,7 @@ async fn rejects_payloads_exceeding_title_summary_and_content_limits() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await;
@@ -344,6 +356,7 @@ async fn rejects_payloads_exceeding_title_summary_and_content_limits() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await;
@@ -364,6 +377,7 @@ async fn rejects_payloads_exceeding_title_summary_and_content_limits() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await;
@@ -388,6 +402,7 @@ async fn handles_tag_slug_collisions_and_archive_preservation() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["Web Dev".to_string(), "web-dev".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -408,6 +423,7 @@ async fn handles_tag_slug_collisions_and_archive_preservation() {
             status: Some(PostStatus::Archived),
             tags: None,
             scheduled_for: None,
+            book_color: None,
             version: created.post.version,
         },
     )

@@ -140,19 +140,19 @@ pub async fn get_post(
     State(pool): State<SqlitePool>,
     Path(id): Path<i64>,
 ) -> Result<Response, ApiError> {
-    let post_with_tags = service::get_post_by_id(&pool, id)
+    let post_resp = service::get_admin_post_by_id(&pool, id)
         .await
         .map_err(|_| ApiError::internal())?
         .ok_or_else(|| ApiError::not_found("Post not found"))?;
 
-    if auth.user.role != UserRole::Owner && post_with_tags.post.author_id != auth.user.id {
+    if auth.user.role != UserRole::Owner && post_resp.author_id != auth.user.id {
         return Err(ApiError::forbidden(
             "You do not have permission to view this post",
         ));
     }
 
-    let (etag_name, etag_val) = etag_header(post_with_tags.post.version);
-    let mut response = (StatusCode::OK, Json(PostResponse::from(&post_with_tags))).into_response();
+    let (etag_name, etag_val) = etag_header(post_resp.version);
+    let mut response = (StatusCode::OK, Json(post_resp)).into_response();
     response.headers_mut().insert(etag_name, etag_val);
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -292,6 +292,70 @@ pub async fn unpublish_post(
     Ok(response)
 }
 
+pub async fn archive_post(
+    auth: AuthenticatedUser,
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let expected_version = parse_if_match(&headers)?;
+
+    let existing = service::get_post_by_id(&pool, id)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| ApiError::not_found("Post not found"))?;
+
+    if auth.user.role != UserRole::Owner && existing.post.author_id != auth.user.id {
+        return Err(ApiError::forbidden("You do not have permission to archive this post"));
+    }
+
+    let archived = service::archive_post(&pool, id, expected_version)
+        .await
+        .map_err(map_service_error)?;
+
+    let (etag_name, etag_val) = etag_header(archived.post.version);
+    let mut response = (StatusCode::OK, Json(PostResponse::from(&archived))).into_response();
+    response.headers_mut().insert(etag_name, etag_val);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
+}
+
+pub async fn unarchive_post(
+    auth: AuthenticatedUser,
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let expected_version = parse_if_match(&headers)?;
+
+    let existing = service::get_post_by_id(&pool, id)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| ApiError::not_found("Post not found"))?;
+
+    if auth.user.role != UserRole::Owner && existing.post.author_id != auth.user.id {
+        return Err(ApiError::forbidden("You do not have permission to unarchive this post"));
+    }
+
+    let unarchived = service::unarchive_post(&pool, id, expected_version)
+        .await
+        .map_err(map_service_error)?;
+
+    let (etag_name, etag_val) = etag_header(unarchived.post.version);
+    let mut response = (StatusCode::OK, Json(PostResponse::from(&unarchived))).into_response();
+    response.headers_mut().insert(etag_name, etag_val);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
+}
+
 pub async fn preview_post(
     auth: AuthenticatedUser,
     headers: HeaderMap,
@@ -303,6 +367,71 @@ pub async fn preview_post(
     let response_body = PreviewPostResponse { content_html };
 
     let mut response = (StatusCode::OK, Json(response_body)).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
+}
+
+pub async fn save_post_draft(
+    auth: AuthenticatedUser,
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdatePostDto>,
+) -> Result<Response, ApiError> {
+    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let existing = service::get_post_by_id(&pool, id)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| ApiError::not_found("Post not found"))?;
+
+    if auth.user.role != UserRole::Owner && existing.post.author_id != auth.user.id {
+        return Err(ApiError::forbidden(
+            "You do not have permission to modify this post",
+        ));
+    }
+
+    let post_resp = service::save_post_draft(&pool, id, payload)
+        .await
+        .map_err(map_service_error)?;
+
+    let (etag_name, etag_val) = etag_header(post_resp.version);
+    let mut response = (StatusCode::OK, Json(post_resp)).into_response();
+    response.headers_mut().insert(etag_name, etag_val);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
+}
+
+pub async fn discard_post_draft(
+    auth: AuthenticatedUser,
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    verify_csrf(&headers, &auth.session.csrf_token)?;
+    let existing = service::get_post_by_id(&pool, id)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| ApiError::not_found("Post not found"))?;
+
+    if auth.user.role != UserRole::Owner && existing.post.author_id != auth.user.id {
+        return Err(ApiError::forbidden(
+            "You do not have permission to modify this post",
+        ));
+    }
+
+    let post_resp = service::discard_post_draft(&pool, id)
+        .await
+        .map_err(map_service_error)?;
+
+    let (etag_name, etag_val) = etag_header(post_resp.version);
+    let mut response = (StatusCode::OK, Json(post_resp)).into_response();
+    response.headers_mut().insert(etag_name, etag_val);
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         header::HeaderValue::from_static("no-store"),

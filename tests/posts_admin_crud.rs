@@ -70,6 +70,7 @@ async fn login_user(app: &Router, email: &str, password: &str) -> (String, Strin
                     serde_json::to_vec(&LoginRequest {
                         email: email.into(),
                         password: password.into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -152,6 +153,7 @@ async fn author_creates_post_with_csrf_origin_and_etag() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                     })
                     .unwrap(),
                 ))
@@ -179,6 +181,7 @@ async fn author_creates_post_with_csrf_origin_and_etag() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                     })
                     .unwrap(),
                 ))
@@ -207,6 +210,7 @@ async fn author_creates_post_with_csrf_origin_and_etag() {
                         status: None,
                         tags: Some(vec!["Editorial".into()]),
                         scheduled_for: None,
+                        book_color: None,
                     })
                     .unwrap(),
                 ))
@@ -282,6 +286,7 @@ async fn author_isolation_and_owner_access_privileges() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                     })
                     .unwrap(),
                 ))
@@ -326,6 +331,7 @@ async fn author_isolation_and_owner_access_privileges() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                         version: 1,
                     })
                     .unwrap(),
@@ -356,6 +362,7 @@ async fn author_isolation_and_owner_access_privileges() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                         version: 1,
                     })
                     .unwrap(),

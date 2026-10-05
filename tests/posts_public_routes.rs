@@ -66,6 +66,7 @@ async fn list_posts_only_returns_published_items_with_cache_header() {
             status: Some(PostStatus::Draft),
             tags: Some(vec!["DraftTag".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -82,6 +83,7 @@ async fn list_posts_only_returns_published_items_with_cache_header() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["Rust".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -122,6 +124,7 @@ async fn get_post_by_slug_returns_published_post_and_404_for_draft() {
             status: Some(PostStatus::Draft),
             tags: None,
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -138,6 +141,7 @@ async fn get_post_by_slug_returns_published_post_and_404_for_draft() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["Public".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -192,6 +196,7 @@ async fn search_posts_finds_published_content_and_safely_escapes_query() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["Rust".to_string(), "Axum".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -237,6 +242,7 @@ async fn list_tags_only_returns_tags_from_published_posts() {
             status: Some(PostStatus::Draft),
             tags: Some(vec!["OnlyDraftTag".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await
@@ -253,6 +259,7 @@ async fn list_tags_only_returns_tags_from_published_posts() {
             status: Some(PostStatus::Published),
             tags: Some(vec!["PublicTag".to_string()]),
             scheduled_for: None,
+            book_color: None,
         },
     )
     .await

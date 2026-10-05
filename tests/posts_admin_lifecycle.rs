@@ -70,6 +70,7 @@ async fn login_user(app: &Router, email: &str, password: &str) -> (String, Strin
                     serde_json::to_vec(&LoginRequest {
                         email: email.into(),
                         password: password.into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -135,6 +136,7 @@ async fn lifecycle_enforces_if_match_and_updates_version() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                     })
                     .unwrap(),
                 ))
@@ -180,6 +182,7 @@ async fn lifecycle_enforces_if_match_and_updates_version() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                         version: 1,
                     })
                     .unwrap(),
@@ -213,6 +216,7 @@ async fn lifecycle_enforces_if_match_and_updates_version() {
                         status: None,
                         tags: None,
                         scheduled_for: None,
+                        book_color: None,
                         version: 99,
                     })
                     .unwrap(),

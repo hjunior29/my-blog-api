@@ -15,8 +15,11 @@ pub fn render_and_sanitize(markdown: &str) -> String {
     cleaner
         .add_tags(&[
             "h1", "h2", "h3", "h4", "h5", "h6", "del", "ins", "table", "thead", "tbody", "tr",
-            "th", "td", "hr",
+            "th", "td", "hr", "video", "audio", "source",
         ])
+        .add_tag_attributes("video", &["src", "controls", "preload", "poster", "loop", "muted", "width", "height"])
+        .add_tag_attributes("audio", &["src", "controls", "preload", "loop", "muted"])
+        .add_tag_attributes("source", &["src", "type"])
         .link_rel(Some("noopener noreferrer"));
 
     cleaner.clean(&raw_html).to_string()
@@ -44,5 +47,13 @@ mod tests {
         let html = render_and_sanitize(md);
         assert!(!html.contains("onerror"));
         assert!(!html.contains("javascript:"));
+    }
+
+    #[test]
+    fn markdown_preserves_safe_video_and_audio_elements() {
+        let md = "<video controls src=\"https://example.com/clip.mp4\"></video>\n<audio controls src=\"https://example.com/sound.mp3\"></audio>";
+        let html = render_and_sanitize(md);
+        assert!(html.contains("<video controls=\"\" src=\"https://example.com/clip.mp4\"></video>") || html.contains("<video src=\"https://example.com/clip.mp4\" controls>"));
+        assert!(html.contains("<audio controls=\"\" src=\"https://example.com/sound.mp3\"></audio>") || html.contains("<audio src=\"https://example.com/sound.mp3\" controls>"));
     }
 }

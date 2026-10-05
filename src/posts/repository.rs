@@ -14,6 +14,7 @@ pub struct NewPostRecord<'a> {
     pub published_at: Option<i64>,
     pub scheduled_for: Option<i64>,
     pub now: i64,
+    pub book_color: Option<&'a str>,
 }
 
 pub struct UpdatePostRecord<'a> {
@@ -28,13 +29,14 @@ pub struct UpdatePostRecord<'a> {
     pub scheduled_for: Option<i64>,
     pub now: i64,
     pub expected_version: i64,
+    pub book_color: Option<&'a str>,
 }
 
 pub async fn find_post_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Post>, sqlx::Error> {
     sqlx::query_as::<_, Post>(
         "SELECT id, slug, title, summary, content_md, content_html,
                 featured_image_media_id, status, author_id, published_at,
-                scheduled_for, created_at, updated_at, version
+                scheduled_for, created_at, updated_at, version, book_color
          FROM posts WHERE id = ?",
     )
     .bind(id)
@@ -46,7 +48,7 @@ pub async fn find_post_by_slug(pool: &SqlitePool, slug: &str) -> Result<Option<P
     sqlx::query_as::<_, Post>(
         "SELECT id, slug, title, summary, content_md, content_html,
                 featured_image_media_id, status, author_id, published_at,
-                scheduled_for, created_at, updated_at, version
+                scheduled_for, created_at, updated_at, version, book_color
          FROM posts WHERE slug = ?",
     )
     .bind(slug)
@@ -70,8 +72,8 @@ pub async fn insert_post(
         "INSERT INTO posts (
             slug, title, summary, content_md, content_html,
             featured_image_media_id, status, author_id, published_at,
-            scheduled_for, created_at, updated_at, version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            scheduled_for, created_at, updated_at, version, book_color
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
     )
     .bind(record.slug)
     .bind(record.title)
@@ -85,6 +87,7 @@ pub async fn insert_post(
     .bind(record.scheduled_for)
     .bind(record.now)
     .bind(record.now)
+    .bind(record.book_color)
     .execute(conn)
     .await?;
 
@@ -99,7 +102,8 @@ pub async fn update_post(
         "UPDATE posts SET
             title = ?, summary = ?, content_md = ?, content_html = ?,
             featured_image_media_id = ?, status = ?, published_at = ?,
-            scheduled_for = ?, updated_at = ?, version = version + 1
+            scheduled_for = ?, updated_at = ?, version = version + 1,
+            book_color = ?
          WHERE id = ? AND version = ?",
     )
     .bind(record.title)
@@ -111,6 +115,7 @@ pub async fn update_post(
     .bind(record.published_at)
     .bind(record.scheduled_for)
     .bind(record.now)
+    .bind(record.book_color)
     .bind(record.id)
     .bind(record.expected_version)
     .execute(conn)
@@ -188,7 +193,7 @@ pub async fn list_published(
     sqlx::query_as::<_, Post>(
         "SELECT id, slug, title, summary, content_md, content_html,
                 featured_image_media_id, status, author_id, published_at,
-                scheduled_for, created_at, updated_at, version
+                scheduled_for, created_at, updated_at, version, book_color
          FROM posts
          WHERE status = 'published'
          ORDER BY published_at DESC, created_at DESC
@@ -209,20 +214,35 @@ pub async fn count_published(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
 pub async fn search_published_fts(
     pool: &SqlitePool,
     query: &str,
+    like_query: &str,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Post>, sqlx::Error> {
     sqlx::query_as::<_, Post>(
         "SELECT p.id, p.slug, p.title, p.summary, p.content_md, p.content_html,
                 p.featured_image_media_id, p.status, p.author_id, p.published_at,
-                p.scheduled_for, p.created_at, p.updated_at, p.version
-         FROM posts_fts f
-         JOIN posts p ON p.id = f.rowid
-         WHERE posts_fts MATCH ? AND p.status = 'published'
-         ORDER BY rank
+                p.scheduled_for, p.created_at, p.updated_at, p.version, p.book_color
+         FROM posts p
+         WHERE p.status = 'published'
+           AND (
+               (p.id IN (SELECT rowid FROM posts_fts WHERE posts_fts MATCH ?))
+               OR p.title LIKE ?
+               OR p.summary LIKE ?
+           )
+         ORDER BY
+           CASE
+             WHEN p.title LIKE ? THEN 1
+             WHEN p.summary LIKE ? THEN 2
+             ELSE 3
+           END,
+           p.published_at DESC
          LIMIT ? OFFSET ?",
     )
     .bind(query)
+    .bind(like_query)
+    .bind(like_query)
+    .bind(like_query)
+    .bind(like_query)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
@@ -232,14 +252,21 @@ pub async fn search_published_fts(
 pub async fn count_search_published_fts(
     pool: &SqlitePool,
     query: &str,
+    like_query: &str,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT COUNT(*)
-         FROM posts_fts f
-         JOIN posts p ON p.id = f.rowid
-         WHERE posts_fts MATCH ? AND p.status = 'published'",
+         FROM posts p
+         WHERE p.status = 'published'
+           AND (
+               (p.id IN (SELECT rowid FROM posts_fts WHERE posts_fts MATCH ?))
+               OR p.title LIKE ?
+               OR p.summary LIKE ?
+           )",
     )
     .bind(query)
+    .bind(like_query)
+    .bind(like_query)
     .fetch_one(pool)
     .await
 }
@@ -255,7 +282,7 @@ pub async fn list_posts_admin(
     sqlx::query_as::<_, Post>(
         "SELECT id, slug, title, summary, content_md, content_html,
                 featured_image_media_id, status, author_id, published_at,
-                scheduled_for, created_at, updated_at, version
+                scheduled_for, created_at, updated_at, version, book_color
          FROM posts
          WHERE (? IS NULL OR author_id = ?)
            AND (? IS NULL OR status = ?)
@@ -325,6 +352,65 @@ pub async fn delete_post_with_version(
         .bind(id)
         .bind(expected_version)
         .execute(pool)
+        .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+pub async fn find_post_draft(
+    pool: &SqlitePool,
+    post_id: i64,
+) -> Result<Option<super::model::PostDraft>, sqlx::Error> {
+    sqlx::query_as::<_, super::model::PostDraft>(
+        "SELECT post_id, title, summary, content_md, content_html,
+                featured_image_media_id, book_color, tags, updated_at
+         FROM post_drafts WHERE post_id = ?",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn upsert_post_draft(
+    conn: &mut SqliteConnection,
+    draft: &super::model::PostDraft,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO post_drafts (
+            post_id, title, summary, content_md, content_html,
+            featured_image_media_id, book_color, tags, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(post_id) DO UPDATE SET
+            title = excluded.title,
+            summary = excluded.summary,
+            content_md = excluded.content_md,
+            content_html = excluded.content_html,
+            featured_image_media_id = excluded.featured_image_media_id,
+            book_color = excluded.book_color,
+            tags = excluded.tags,
+            updated_at = excluded.updated_at",
+    )
+    .bind(draft.post_id)
+    .bind(&draft.title)
+    .bind(&draft.summary)
+    .bind(&draft.content_md)
+    .bind(&draft.content_html)
+    .bind(&draft.featured_image_media_id)
+    .bind(&draft.book_color)
+    .bind(&draft.tags)
+    .bind(draft.updated_at)
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn delete_post_draft(
+    conn: &mut SqliteConnection,
+    post_id: i64,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM post_drafts WHERE post_id = ?")
+        .bind(post_id)
+        .execute(conn)
         .await?;
     Ok(res.rows_affected() > 0)
 }

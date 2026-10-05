@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 pub enum PostStatus {
     Draft,
     Published,
-    Scheduled,
     Archived,
 }
 
@@ -17,7 +16,6 @@ impl fmt::Display for PostStatus {
         match self {
             Self::Draft => write!(f, "draft"),
             Self::Published => write!(f, "published"),
-            Self::Scheduled => write!(f, "scheduled"),
             Self::Archived => write!(f, "archived"),
         }
     }
@@ -30,7 +28,6 @@ impl std::str::FromStr for PostStatus {
         match s {
             "draft" => Ok(Self::Draft),
             "published" => Ok(Self::Published),
-            "scheduled" => Ok(Self::Scheduled),
             "archived" => Ok(Self::Archived),
             _ => Err("invalid post status"),
         }
@@ -53,6 +50,7 @@ pub struct Post {
     pub created_at: i64,
     pub updated_at: i64,
     pub version: i64,
+    pub book_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -73,4 +71,17 @@ pub struct PostTag {
 pub struct PostWithTags {
     pub post: Post,
     pub tags: Vec<Tag>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PostDraft {
+    pub post_id: i64,
+    pub title: String,
+    pub summary: String,
+    pub content_md: String,
+    pub content_html: String,
+    pub featured_image_media_id: Option<String>,
+    pub book_color: Option<String>,
+    pub tags: String,
+    pub updated_at: i64,
 }

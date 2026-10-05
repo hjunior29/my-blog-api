@@ -25,6 +25,14 @@ pub fn router() -> Router<AppState> {
         )
         .route("/posts/{id}/publish", post(admin_handler::publish_post))
         .route("/posts/{id}/unpublish", post(admin_handler::unpublish_post))
+        .route("/posts/{id}/archive", post(admin_handler::archive_post))
+        .route("/posts/{id}/unarchive", post(admin_handler::unarchive_post))
+        .route(
+            "/posts/{id}/draft",
+            patch(admin_handler::save_post_draft)
+                .delete(admin_handler::discard_post_draft)
+                .layer(DefaultBodyLimit::max(MAX_POST_BODY_BYTES)),
+        )
         .route(
             "/posts/preview",
             post(admin_handler::preview_post).layer(DefaultBodyLimit::max(MAX_POST_BODY_BYTES)),
