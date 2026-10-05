@@ -209,6 +209,11 @@ pub async fn disable_user(pool: &SqlitePool, user_id: i64) -> Result<(), UserSer
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("UPDATE auth_two_factor_challenges SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL")
+        .bind(now)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
     Ok(())
@@ -229,6 +234,11 @@ pub async fn reset_password(
 
     repository::update_password(&mut tx, user_id, &password_hash, now).await?;
     sqlx::query("UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+        .bind(now)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE auth_two_factor_challenges SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL")
         .bind(now)
         .bind(user_id)
         .execute(&mut *tx)
@@ -260,6 +270,34 @@ pub async fn set_user_role(
 
     let now = current_unix_time();
     repository::set_role(&mut tx, user_id, new_role, now).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn update_user_email(
+    pool: &SqlitePool,
+    user_id: i64,
+    new_email: &str,
+) -> Result<(), UserServiceError> {
+    let normalized = normalize_email(new_email)?;
+    let _ = repository::find_by_id(pool, user_id)
+        .await?
+        .ok_or(UserServiceError::UserNotFound)?;
+
+    let mut tx = pool.begin().await?;
+    let now = current_unix_time();
+    let updated = match repository::update_email(&mut tx, user_id, new_email.trim(), &normalized, now).await {
+        Ok(ok) => ok,
+        Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+            return Err(UserServiceError::EmailAlreadyRegistered);
+        }
+        Err(e) => return Err(UserServiceError::Database(e)),
+    };
+
+    if !updated {
+        return Err(UserServiceError::UserNotFound);
+    }
+
     tx.commit().await?;
     Ok(())
 }
@@ -344,6 +382,11 @@ pub async fn change_password(
     .bind(current_session_id)
     .execute(&mut *tx)
     .await?;
+    sqlx::query("UPDATE auth_two_factor_challenges SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL")
+        .bind(now)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
     Ok(())
@@ -402,6 +445,11 @@ pub async fn admin_update_user(
             .bind(user_id)
             .execute(&mut *tx)
             .await?;
+            sqlx::query("UPDATE auth_two_factor_challenges SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL")
+                .bind(now)
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
         }
     }
 

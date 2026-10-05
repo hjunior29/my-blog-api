@@ -44,7 +44,7 @@ async fn owner_only_rejects_author_login_and_existing_author_sessions() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let now = service::current_unix_time();
     let mut conn = pool.acquire().await.unwrap();
-    let (session, _) = session::create_session(&mut conn, author, None, None, now)
+    let (session, _) = session::create_session(&mut conn, author, None, None, false, now)
         .await
         .unwrap();
     drop(conn);

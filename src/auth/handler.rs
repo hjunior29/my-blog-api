@@ -7,13 +7,17 @@ use sqlx::SqlitePool;
 
 use super::{
     cookie::{self, access_cookie_name, refresh_cookie_name},
-    dto::{CsrfResponse, LoginRequest, LoginResponse, SessionItemResponse},
+    dto::{
+        CsrfResponse, LoginRequest, LoginResponse, LoginResultResponse, SessionItemResponse,
+        TwoFactorChallengeResponse,
+    },
     jwt,
     middleware::{AuthenticatedUser, verify_csrf},
-    password, session,
+    password, session, two_factor,
 };
 use crate::{
     config::Config,
+    email::EmailService,
     http::{error::ApiError, json::Json},
     users::{
         model::{UserProfile, UserRole, UserStatus},
@@ -58,14 +62,49 @@ pub async fn login(
         return Err(ApiError::invalid_credentials());
     }
 
+    let now = current_unix_time();
+    let remember_me = payload.remember_me.unwrap_or(false);
+
+    if config.two_factor_enabled {
+        let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
+        let (challenge_token, code) = two_factor::create_challenge(&mut conn, user.id, remember_me, now)
+            .await
+            .map_err(|_| ApiError::internal())?;
+
+        let email_service = EmailService::new(config.clone());
+        email_service
+            .send_two_factor_code(&user.email, &code)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to send 2FA email");
+                ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "email_delivery_failed",
+                    "Failed to deliver verification email",
+                )
+            })?;
+
+        let response_body = LoginResultResponse::TwoFactorRequired(TwoFactorChallengeResponse {
+            requires_2fa: true,
+            challenge_token,
+            email_masked: two_factor::mask_email(&user.email),
+        });
+
+        let mut response = (StatusCode::OK, Json(response_body)).into_response();
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        );
+        return Ok(response);
+    }
+
     let user_agent = headers
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok());
-    let now = current_unix_time();
 
     let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
     let (session, raw_refresh_token) =
-        session::create_session(&mut conn, user.id, user_agent, None, now)
+        session::create_session(&mut conn, user.id, user_agent, None, remember_me, now)
             .await
             .map_err(|_| ApiError::internal())?;
 
@@ -79,10 +118,10 @@ pub async fn login(
         session.expires_at - now,
     );
 
-    let response_body = LoginResponse {
+    let response_body = LoginResultResponse::Success(LoginResponse {
         user: UserProfile::from(&user),
         csrf_token: session.csrf_token,
-    };
+    });
 
     let mut response = (StatusCode::OK, Json(response_body)).into_response();
     response

@@ -12,7 +12,7 @@ use super::{
     session::{self, AuthSession, constant_time_compare},
 };
 use crate::{
-    config::Config,
+    config::{AppEnv, Config},
     http::error::ApiError,
     users::{
         model::{User, UserRole, UserStatus},
@@ -41,15 +41,34 @@ pub async fn check_origin(State(config): State<Config>, request: Request, next: 
             .get(header::ORIGIN)
             .and_then(|v| v.to_str().ok());
 
-        match origin {
-            Some(o) if o == config.app_origin => (),
-            _ => {
-                return ApiError::forbidden("Origin not allowed").into_response();
-            }
+        let is_allowed = match origin {
+            Some(o) if o == config.app_origin => true,
+            Some(o) if config.env == AppEnv::Development => is_local_dev_origin(o),
+            _ => false,
+        };
+
+        if !is_allowed {
+            return ApiError::forbidden("Origin not allowed").into_response();
         }
     }
 
     next.run(request).await
+}
+
+fn is_local_dev_origin(origin: &str) -> bool {
+    if let Some(host_part) = origin.strip_prefix("http://").or_else(|| origin.strip_prefix("https://")) {
+        let host = host_part.split(':').next().unwrap_or("");
+        if host == "localhost" || host == "127.0.0.1" {
+            return true;
+        }
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            return match ip {
+                std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
+                std::net::IpAddr::V6(v6) => v6.is_loopback(),
+            };
+        }
+    }
+    false
 }
 
 #[derive(Clone)]

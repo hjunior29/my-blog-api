@@ -41,13 +41,22 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
     args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
 }
 
+fn get_password(args: &[String], prompt: &str) -> Result<String, String> {
+    if let Some(pass) = get_arg(args, "--password") {
+        if !pass.trim().is_empty() {
+            return Ok(pass);
+        }
+    }
+    read_secret(prompt)
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 || args[1] == "--help" || args[1] == "-h" || args[1] == "help" {
         println!("Usage: blog-admin <command> [options]");
         println!(
-            "Commands: seed-owner, seed-posts, user-create, user-disable, user-reset-password, user-set-role"
+            "Commands: seed-owner, seed-posts, user-create, user-disable, user-reset-password, user-set-role, user-update-email"
         );
         return ExitCode::SUCCESS;
     }
@@ -77,6 +86,7 @@ async fn main() -> ExitCode {
         "user-disable" => handle_user_disable(&pool, &args).await,
         "user-reset-password" => handle_user_reset_password(&pool, &args).await,
         "user-set-role" => handle_user_set_role(&pool, &args).await,
+        "user-update-email" => handle_user_update_email(&pool, &args).await,
         _ => {
             eprintln!("Unknown command: {command}");
             Err("unknown command".into())
@@ -103,7 +113,7 @@ async fn handle_seed_owner(pool: &sqlx::SqlitePool, args: &[String]) -> Result<(
         Some(n) => n,
         None => prompt_text("Owner display name: ")?,
     };
-    let password = read_secret("Owner password: ")?;
+    let password = get_password(args, "Owner password: ")?;
 
     match service::seed_owner(pool, &email, &display_name, &password).await {
         Ok(SeedResult::Created(id)) => {
@@ -137,6 +147,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
         content_md: &'static str,
         status: PostStatus,
         tags: &'static [&'static str],
+        book_color: Option<&'static str>,
     }
 
     let samples: [SamplePost; 6] = [
@@ -146,6 +157,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             content_md: "Ao desenhar a arquitetura deste blog pessoal, o objetivo central foi unir **desempenho intransigente** e uma experiencia de desenvolvimento simples.\n\n### Por que Rust no Backend?\n\nO uso do ecossistema Axum e Tokio com SQLite embutido nos proporciona:\n- **Consumo de memoria infimo:** O processo consome poucos megabytes em repouso.\n- **Concorrencia segura:** Verificacao estrita em tempo de compilacao.\n- **Tipagem de ponta a ponta:** DTOs com validacoes claras e sem suposicoes.\n\n```rust\n// Exemplo conceitual do pipeline\npub async fn get_post_by_slug(pool: &SqlitePool, slug: &str) -> Result<Post, PostError> {\n    repository::find_by_slug(pool, slug).await\n}\n```\n\n### A Escolha do SolidJS\n\nDiferente de frameworks com Virtual DOM pesados, o SolidJS compila diretamente para nos reativos do DOM:\n1. Sem reconciliacao continua e sem overhead de diffing.\n2. Estado granular que atualiza estritamente o no afetado.\n3. Bundle inicial compacto (< 60 KiB gzipped).\n\nO resultado e uma leitura fluida e navegacao instantanea.",
             status: PostStatus::Published,
             tags: &["Rust", "SolidJS", "Arquitetura", "Web"],
+            book_color: Some("#2d4a3e"),
         },
         SamplePost {
             title: "Principios de um Design System Editorial Focado em Tipografia",
@@ -153,6 +165,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             content_md: "O design visual de um blog tecnico e reflexivo nao deve competir com o conteudo, mas sim acolhe-lo.\n\n> \"A boa tipografia e como um vidro transparente: voce le o que esta por tras sem perceber a lente.\"\n\n### Escolhas Tipograficas\n\nAdotamos uma hierarquia que valoriza a legibilidade:\n- **Newsreader:** Uma serifa editorial elegante para titulos e destaques.\n- **Manrope:** Sans-serif geometrica para o corpo de texto e controles.\n- **Geist Mono:** Monospace cirurgica para metadados e codigo.\n\n### Cores e Texturas\n\nTrabalhamos com uma paleta inspirada em materiais fisicos:\n- Fundo papel quente (*warm paper*) que evita a fadiga do branco puro.\n- Tinta profunda (*deep ink*) mantendo contraste adequado em temas claro e escuro.\n- Acentos terracota sutis para guiar a atencao com harmonia.",
             status: PostStatus::Published,
             tags: &["Design System", "CSS", "Tipografia", "Acessibilidade"],
+            book_color: Some("#a74832"),
         },
         SamplePost {
             title: "SQLite em Producao: Por Que Bancos Embutidos Fazem Sentido",
@@ -160,6 +173,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             content_md: "Por muitos anos, a convencao padrao para qualquer aplicacao web foi subir um servidor de banco de dados separado, mesmo para sites de trafego moderado ou blogs pessoais.\n\n### As Vantagens do SQLite Moderno\n\nCom as opcoes corretas, o SQLite e uma escolha extraordinaria:\n- **Zero latencia de rede:** Consultas executam no mesmo processo, sem round-trip TCP.\n- **WAL (Write-Ahead Logging):** Leitores concorrentes nao bloqueiam escritores.\n- **Backup simplificado:** Um unico arquivo persistente que pode ser versionado ou copiado.\n- **FTS5 Integrado:** Busca textual completa sem servicos externos pesados.\n\n### Configuracao Recomendada\n\n```sql\nPRAGMA journal_mode = WAL;\nPRAGMA synchronous = FULL;\nPRAGMA foreign_keys = ON;\nPRAGMA busy_timeout = 5000;\n```\n\nEssa simplicidade reduz a complexidade operacional e os custos a praticamente zero.",
             status: PostStatus::Published,
             tags: &["SQLite", "Banco de Dados", "Rust", "Performance"],
+            book_color: Some("#2e3a59"),
         },
         SamplePost {
             title: "Seguranca Pragmatica em APIs: Sessoes HttpOnly sem Complexidade",
@@ -167,6 +181,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             content_md: "A seguranca nao deve ser nem negligenciada nem transformada em um labirinto impraticavel.\n\n### Estrategia de Sessao Adotada\n\nOptamos pelo equilibrio entre robustez e facilidade operacional:\n1. **Cookies HttpOnly e SameSite=Lax:** O JavaScript do navegador nunca tem acesso direto aos tokens de autenticacao.\n2. **Access Token curto + Refresh Rotativo:** O access token expira rapidamente e a rotatividade detecta tentativas de reuso.\n3. **Verificacao de Origem e CSRF:** Qualquer mutacao valida a origem exata e exige token CSRF em memoria.\n\nDessa forma, mantemos o blog seguro sem depender de middlewares opacos.",
             status: PostStatus::Published,
             tags: &["Seguranca", "Backend", "Web"],
+            book_color: Some("#8a4f20"),
         },
         SamplePost {
             title: "Otimizando a Performance Web do Inicio ao Fim",
@@ -174,6 +189,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             content_md: "Velocidade e uma funcionalidade essencial para qualquer produto digital.\n\n### Estrategias Essenciais\n\nPara atingir pontuacoes maximas nos Core Web Vitals (LCP, INP, CLS):\n- **Eliminacao de CSS nao utilizado:** Menos de 60 KB de estilos totais.\n- **SVG Inlined e Otimizado:** Icones leves sem requisicoes de rede extras.\n- **Fontes com preload:** Evita flashes de texto invisivel (FOIT).\n- **Zero Empty States:** Cada transicao de tela possui esqueletos e feedbacks claros.\n\nQuando cada milissegundo conta, a leitura ganha fluidez natural.",
             status: PostStatus::Published,
             tags: &["Performance", "Web", "JavaScript"],
+            book_color: Some("#5a3d5c"),
         },
         SamplePost {
             title: "Proximos Passos: Suporte a Midias e Workers de Agendamento",
@@ -181,6 +197,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             content_md: "Anotacoes e roadmap para os proximos ciclos de desenvolvimento:\n\n- [ ] Upload multipart autenticado para imagens de capa e ilustracoes.\n- [ ] Worker em background para transicao automatica de posts agendados.\n- [ ] Feeds RSS e Atom para distribuicao aberta de conteudo.\n\n*Este artigo e um rascunho de trabalho visivel apenas no painel administrativo.*",
             status: PostStatus::Draft,
             tags: &["Roadmap", "DevOps"],
+            book_color: Some("#3d5a5b"),
         },
     ];
 
@@ -202,6 +219,7 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
             status: Some(item.status),
             tags: Some(item.tags.iter().map(|&s| s.to_string()).collect()),
             scheduled_for: None,
+            book_color: item.book_color.map(ToString::to_string),
         };
 
         match post_service::create_post(pool, owner_id, dto).await {
@@ -225,7 +243,7 @@ async fn handle_user_create(pool: &sqlx::SqlitePool, args: &[String]) -> Result<
     let name = get_arg(args, "--name").ok_or("missing --name")?;
     let role_str = get_arg(args, "--role").unwrap_or_else(|| "author".into());
     let role = role_str.parse::<UserRole>().map_err(|e| e.to_string())?;
-    let password = read_secret("User password: ")?;
+    let password = get_password(args, "User password: ")?;
 
     let id = service::create_user(pool, &email, &name, &password, role)
         .await
@@ -249,9 +267,19 @@ async fn handle_user_reset_password(
     pool: &sqlx::SqlitePool,
     args: &[String],
 ) -> Result<(), String> {
-    let id_str = get_arg(args, "--id").ok_or("missing --id")?;
-    let id = id_str.parse::<i64>().map_err(|_| "invalid --id")?;
-    let new_password = read_secret("New password: ")?;
+    let id = if let Some(id_str) = get_arg(args, "--id") {
+        id_str.parse::<i64>().map_err(|_| "invalid --id")?
+    } else if let Some(email) = get_arg(args, "--email") {
+        let normalized = my_blog_api::users::service::normalize_email(&email).map_err(|e| e.to_string())?;
+        let user = my_blog_api::users::repository::find_by_normalized_email(pool, &normalized)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("user with email '{email}' not found"))?;
+        user.id
+    } else {
+        return Err("missing --id or --email".into());
+    };
+    let new_password = get_password(args, "New password: ")?;
     service::reset_password(pool, id, &new_password)
         .await
         .map_err(|e| e.to_string())?;
@@ -268,6 +296,19 @@ async fn handle_user_set_role(pool: &sqlx::SqlitePool, args: &[String]) -> Resul
         .await
         .map_err(|e| e.to_string())?;
     println!("User {id} role updated successfully to {role}");
+    Ok(())
+}
+
+async fn handle_user_update_email(pool: &sqlx::SqlitePool, args: &[String]) -> Result<(), String> {
+    let id_str = get_arg(args, "--id").ok_or("missing --id")?;
+    let id = id_str.parse::<i64>().map_err(|_| "invalid --id")?;
+    let new_email = get_arg(args, "--new-email")
+        .or_else(|| get_arg(args, "--email"))
+        .ok_or("missing --new-email")?;
+    service::update_user_email(pool, id, &new_email)
+        .await
+        .map_err(|e| e.to_string())?;
+    println!("User {id} email updated successfully to {new_email}");
     Ok(())
 }
 

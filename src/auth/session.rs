@@ -66,16 +66,24 @@ pub fn constant_time_compare(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
+pub const SHORT_SESSION_TTL_SECS: i64 = 24 * 3600;
+
 pub async fn create_session(
     conn: &mut SqliteConnection,
     user_id: i64,
     user_agent: Option<&str>,
     ip_address: Option<&str>,
+    remember_me: bool,
     now: i64,
 ) -> Result<(AuthSession, String), SessionError> {
     let session_id = generate_random_token();
     let csrf_token = generate_random_token();
-    let expires_at = now + SESSION_TTL_SECS;
+    let ttl = if remember_me {
+        SESSION_TTL_SECS
+    } else {
+        SHORT_SESSION_TTL_SECS
+    };
+    let expires_at = now + ttl;
 
     sqlx::query(
         "INSERT INTO auth_sessions (id, user_id, csrf_token, user_agent, ip_address, created_at, expires_at)

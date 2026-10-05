@@ -89,6 +89,7 @@ async fn author_cannot_access_admin_endpoints() {
                     serde_json::to_vec(&LoginRequest {
                         email: "author@example.com".into(),
                         password: "AuthorPassword123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -141,6 +142,7 @@ async fn owner_can_list_users_and_update_role_and_status() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "ValidOwnerPass123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -178,6 +180,7 @@ async fn owner_can_list_users_and_update_role_and_status() {
                     serde_json::to_vec(&LoginRequest {
                         email: "author@example.com".into(),
                         password: "AuthorPassword123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -244,6 +247,7 @@ async fn last_owner_protection_prevents_disabling_or_demoting_only_owner() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "ValidOwnerPass123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))

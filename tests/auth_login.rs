@@ -63,6 +63,7 @@ async fn login_success_returns_user_and_sets_cookies() {
     let payload = serde_json::to_vec(&LoginRequest {
         email: "owner@example.com".into(),
         password: "ValidOwnerPass123!".into(),
+        remember_me: None,
     })
     .unwrap();
 
@@ -103,6 +104,7 @@ async fn login_failure_does_not_enumerate_users() {
     let non_existent_payload = serde_json::to_vec(&LoginRequest {
         email: "missing@example.com".into(),
         password: "WrongPassword123!".into(),
+        remember_me: None,
     })
     .unwrap();
 
@@ -122,6 +124,7 @@ async fn login_failure_does_not_enumerate_users() {
     let wrong_pw_payload = serde_json::to_vec(&LoginRequest {
         email: "owner@example.com".into(),
         password: "WrongPassword123!".into(),
+        remember_me: None,
     })
     .unwrap();
 
@@ -147,6 +150,7 @@ async fn state_mutations_reject_untrusted_origins() {
     let payload = serde_json::to_vec(&LoginRequest {
         email: "any@example.com".into(),
         password: "AnyPass123!".into(),
+        remember_me: None,
     })
     .unwrap();
 

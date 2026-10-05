@@ -254,3 +254,29 @@ async fn concurrent_seeds_allow_only_one_winner() {
     assert_eq!(active_owners, 1);
     pool.close().await;
 }
+
+#[tokio::test]
+async fn update_user_email_normalizes_and_prevents_duplicates() {
+    let (pool, _dir) = create_test_pool().await;
+    let seed_res = service::seed_owner(&pool, "initial@example.com", "Owner", "ValidPassword123!")
+        .await
+        .unwrap();
+    let user_id = match seed_res {
+        service::SeedResult::Created(id) => id,
+        service::SeedResult::AlreadyExists(id) => id,
+    };
+
+    service::update_user_email(&pool, user_id, "  New.Email@example.COM  ")
+        .await
+        .unwrap();
+    let user = repository::find_by_id(&pool, user_id).await.unwrap().unwrap();
+    assert_eq!(user.email, "New.Email@example.COM");
+    assert_eq!(user.normalized_email, "new.email@example.com");
+
+    let err = service::update_user_email(&pool, user_id, "not-an-email")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, UserServiceError::InvalidEmail));
+
+    pool.close().await;
+}

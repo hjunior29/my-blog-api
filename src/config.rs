@@ -27,13 +27,40 @@ pub struct Config {
     pub jwt_active_key_id: String,
     pub jwt_keys: Arc<HashMap<String, Vec<u8>>>,
     pub media_root: PathBuf,
+    pub s3_endpoint: String,
+    pub s3_bucket: Option<String>,
+    pub s3_access_key: Option<String>,
+    pub s3_secret_key: Option<String>,
+    pub s3_region: String,
+    pub s3_public_url_prefix: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: u16,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from_email: String,
+    pub smtp_from_name: String,
+    pub two_factor_enabled: bool,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_lookup(|key| match env::var(key) {
+        let mut map = HashMap::new();
+        if let Ok(content) = fs::read_to_string(".env") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                if let Some((k, v)) = trimmed.split_once('=') {
+                    let key = k.trim().to_string();
+                    let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                    map.insert(key, val);
+                }
+            }
+        }
+        Self::from_lookup(move |key| match env::var(key) {
             Ok(value) => Ok(Some(value)),
-            Err(env::VarError::NotPresent) => Ok(None),
+            Err(env::VarError::NotPresent) => Ok(map.get(key).cloned()),
             Err(_) => Err(ConfigError(key)),
         })
     }
@@ -131,6 +158,31 @@ impl Config {
         }
         let media_root = PathBuf::from(media_root_str);
 
+        let s3_endpoint = lookup("AWS_ENDPOINT_URL_S3")?
+            .unwrap_or_else(|| "https://fly.storage.tigris.dev".into());
+        let s3_bucket = lookup("BUCKET_NAME")?.or(lookup("TIGRIS_BUCKET")?);
+        let s3_access_key = lookup("AWS_ACCESS_KEY_ID")?;
+        let s3_secret_key = lookup("AWS_SECRET_ACCESS_KEY")?;
+        let s3_region = lookup("AWS_REGION")?.unwrap_or_else(|| "auto".into());
+        let s3_public_url_prefix = lookup("S3_PUBLIC_URL_PREFIX")?;
+
+        let smtp_host = lookup("SMTP_HOST")?;
+        let smtp_port = lookup("SMTP_PORT")?
+            .unwrap_or_else(|| "587".into())
+            .parse::<u16>()
+            .map_err(|_| ConfigError("SMTP_PORT"))?;
+        let smtp_username = lookup("SMTP_USERNAME")?;
+        let smtp_password = lookup("SMTP_PASSWORD")?;
+        let smtp_from_email = lookup("SMTP_FROM_EMAIL")?
+            .unwrap_or_else(|| "noreply@vertices.me".into());
+        let smtp_from_name = lookup("SMTP_FROM_NAME")?
+            .unwrap_or_else(|| "Helder / Blog".into());
+        let two_factor_enabled = match lookup("TWO_FACTOR_ENABLED")?.as_deref() {
+            Some("true") | Some("1") => true,
+            Some("false") | Some("0") => false,
+            _ => env != AppEnv::Test,
+        };
+
         Ok(Self {
             env,
             bind_address,
@@ -144,6 +196,19 @@ impl Config {
             jwt_active_key_id,
             jwt_keys: Arc::new(jwt_keys),
             media_root,
+            s3_endpoint,
+            s3_bucket,
+            s3_access_key,
+            s3_secret_key,
+            s3_region,
+            s3_public_url_prefix,
+            smtp_host,
+            smtp_port,
+            smtp_username,
+            smtp_password,
+            smtp_from_email,
+            smtp_from_name,
+            two_factor_enabled,
         })
     }
 }
@@ -162,6 +227,9 @@ mod tests {
         assert!(!config.secure_cookies);
         assert_eq!(config.jwt_active_key_id, "default");
         assert!(config.jwt_keys.contains_key("default"));
+        assert!(config.two_factor_enabled);
+        assert_eq!(config.smtp_port, 587);
+        assert_eq!(config.smtp_from_email, "noreply@vertices.me");
     }
 
     #[test]
@@ -176,6 +244,7 @@ mod tests {
             ("APP_ORIGIN", "ftp://invalid"),
             ("MEDIA_ROOT", " "),
             ("JWT_SECRET", "too-short"),
+            ("SMTP_PORT", "not-a-port"),
         ] {
             let error = Config::from_lookup(|name| Ok((name == key).then(|| value.to_owned())))
                 .err()

@@ -63,6 +63,7 @@ async fn csrf_endpoint_returns_token_for_valid_access_cookie() {
     let login_payload = serde_json::to_vec(&LoginRequest {
         email: "owner@example.com".into(),
         password: "ValidOwnerPass123!".into(),
+        remember_me: None,
     })
     .unwrap();
 
@@ -113,6 +114,7 @@ async fn refresh_token_rotation_and_csrf_validation() {
     let login_payload = serde_json::to_vec(&LoginRequest {
         email: "owner@example.com".into(),
         password: "ValidOwnerPass123!".into(),
+        remember_me: None,
     })
     .unwrap();
 
@@ -207,6 +209,7 @@ async fn logout_revokes_session_and_clears_cookies() {
     let login_payload = serde_json::to_vec(&LoginRequest {
         email: "owner@example.com".into(),
         password: "ValidOwnerPass123!".into(),
+        remember_me: None,
     })
     .unwrap();
 
@@ -278,6 +281,7 @@ async fn logout_all_revokes_every_session_of_user() {
     let login1_payload = serde_json::to_vec(&LoginRequest {
         email: "owner@example.com".into(),
         password: "ValidOwnerPass123!".into(),
+        remember_me: None,
     })
     .unwrap();
 

@@ -23,6 +23,7 @@ pub const MAX_BODY_BYTES: usize = 64 * 1024;
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Config,
+    pub storage: crate::media::StorageBackend,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -37,12 +38,20 @@ impl axum::extract::FromRef<AppState> for Config {
     }
 }
 
+impl axum::extract::FromRef<AppState> for crate::media::StorageBackend {
+    fn from_ref(state: &AppState) -> Self {
+        state.storage.clone()
+    }
+}
+
 pub const ROOT_BODY_LIMIT_BYTES: usize = 384 * 1024;
 
 pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
+    let storage = crate::media::init_storage(&config);
     let state = AppState {
         pool,
         config: config.clone(),
+        storage,
     };
 
     let origin_check_layer =
@@ -52,12 +61,14 @@ pub fn router_with_config(pool: SqlitePool, config: Config) -> Router {
     let users_routes = crate::users::router().layer(origin_check_layer.clone());
     let admin_routes = crate::admin::router().layer(origin_check_layer);
     let posts_routes = crate::posts::router();
+    let media_routes = crate::media::public_routes();
 
     let api_routes = Router::new()
         .nest("/auth", auth_routes)
         .nest("/users", users_routes)
         .nest("/admin", admin_routes)
-        .merge(posts_routes);
+        .merge(posts_routes)
+        .merge(media_routes);
 
     Router::new()
         .route("/health", get(handler::live))

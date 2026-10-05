@@ -150,3 +150,23 @@ pub async fn update_profile(
 
     find_by_id(pool, id).await
 }
+
+pub async fn update_email(
+    conn: &mut SqliteConnection,
+    id: i64,
+    email: &str,
+    normalized_email: &str,
+    now: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE users SET email = ?, normalized_email = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(email)
+    .bind(normalized_email)
+    .bind(now)
+    .bind(id)
+    .execute(conn)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}

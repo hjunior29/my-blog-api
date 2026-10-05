@@ -6,6 +6,8 @@ pub mod middleware;
 pub mod password;
 pub mod routes;
 pub mod session;
+pub mod two_factor;
+pub mod two_factor_handler;
 
 pub use middleware::{AuthenticatedUser, RequireOwner, check_origin};
 pub use routes::router;

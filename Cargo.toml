@@ -7,10 +7,13 @@ rust-version = "1.94"
 [dependencies]
 argon2 = "0.6.0"
 ammonia = "4.0"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+aws-config = { version = "1.8", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-sdk-s3 = { version = "1.137", default-features = false, features = ["rt-tokio", "rustls"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "multipart"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 base64 = "0.23.1"
 jsonwebtoken = { version = "11.1.0", default-features = false, features = ["rust_crypto"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
 # Keep bundled SQLite on a release with the WAL-reset fix.
 libsqlite3-sys = { version = "0.37", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

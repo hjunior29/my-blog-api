@@ -83,6 +83,7 @@ async fn get_and_update_own_profile() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "ValidOwnerPass123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -154,6 +155,7 @@ async fn change_password_revokes_other_sessions_and_keeps_current() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "InitialPassword123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -177,6 +179,7 @@ async fn change_password_revokes_other_sessions_and_keeps_current() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "InitialPassword123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -260,6 +263,7 @@ async fn change_password_revokes_other_sessions_and_keeps_current() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "InitialPassword123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -280,6 +284,7 @@ async fn change_password_revokes_other_sessions_and_keeps_current() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "BrandNewSecurePassword2026!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))

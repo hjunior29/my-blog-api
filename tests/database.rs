@@ -16,7 +16,7 @@ async fn file_database_persists_data_and_migrations_across_restarts() {
             "SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1"
         )
         .await,
-        4
+        9
     );
     let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
         .fetch_one(&pool)
@@ -43,7 +43,7 @@ async fn file_database_persists_data_and_migrations_across_restarts() {
     assert_eq!(stored, value);
     assert_eq!(
         scalar(&reopened, "SELECT COUNT(*) FROM _sqlx_migrations").await,
-        4
+        9
     );
     reopened.close().await;
 }

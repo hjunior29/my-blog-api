@@ -73,6 +73,7 @@ async fn list_and_delete_active_sessions() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "ValidOwnerPass123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
@@ -97,6 +98,7 @@ async fn list_and_delete_active_sessions() {
                     serde_json::to_vec(&LoginRequest {
                         email: "owner@example.com".into(),
                         password: "ValidOwnerPass123!".into(),
+                        remember_me: None,
                     })
                     .unwrap(),
                 ))
