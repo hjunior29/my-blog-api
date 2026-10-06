@@ -23,6 +23,10 @@ fn transliterate_char(c: char) -> Option<char> {
     }
 }
 
+pub const RESERVED_SLUGS: &[&str] = &[
+    "search", "tags", "admin", "feed", "rss", "api", "new", "edit", "archive", "draft", "login",
+];
+
 pub fn generate_slug(text: &str) -> String {
     let mut slug = String::with_capacity(text.len());
     let mut last_was_dash = true;
@@ -45,10 +49,16 @@ pub fn generate_slug(text: &str) -> String {
     }
 
     let trimmed = slug.trim_end_matches('-');
-    if trimmed.is_empty() {
+    let final_slug = if trimmed.is_empty() {
         "post".to_string()
     } else {
         trimmed.to_string()
+    };
+
+    if RESERVED_SLUGS.contains(&final_slug.as_str()) {
+        format!("{}-post", final_slug)
+    } else {
+        final_slug
     }
 }
 
@@ -71,5 +81,13 @@ mod tests {
             "ultimas-noticias-e-album-de-fotos"
         );
         assert_eq!(generate_slug("   "), "post");
+    }
+
+    #[test]
+    fn reserved_slugs_append_post_suffix() {
+        assert_eq!(generate_slug("Search"), "search-post");
+        assert_eq!(generate_slug("tags"), "tags-post");
+        assert_eq!(generate_slug("API"), "api-post");
+        assert_eq!(generate_slug("Login"), "login-post");
     }
 }

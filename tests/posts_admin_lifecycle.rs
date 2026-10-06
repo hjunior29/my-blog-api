@@ -398,3 +398,74 @@ async fn publishing_draft_with_empty_content_is_rejected() {
     let err_body = json_body(publish_res).await;
     assert_eq!(err_body["error"]["code"], "empty_content");
 }
+
+#[tokio::test]
+async fn saving_draft_exceeding_content_limit_is_rejected() {
+    let (pool, app, _dir) = test_app().await;
+
+    user_service::create_user(
+        &pool,
+        "author_draft_limit@example.com",
+        "Author",
+        "ValidPassword123!",
+        UserRole::Author,
+    )
+    .await
+    .unwrap();
+
+    let (access, csrf) = login_user(&app, "author_draft_limit@example.com", "ValidPassword123!").await;
+
+    let create_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/admin/posts")
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::COOKIE, format!("blog_access={}", access))
+                .header("x-csrf-token", &csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&CreatePostDto {
+                        title: "Post For Huge Draft".into(),
+                        summary: Some("Valid summary".into()),
+                        content_md: "Normal content".into(),
+                        featured_image_media_id: None,
+                        status: None,
+                        tags: None,
+                        scheduled_for: None,
+                        book_color: None,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let post_json = json_body(create_res).await;
+    let post_id = post_json["id"].as_i64().unwrap();
+
+    let huge_content = "a".repeat(256 * 1024 + 10);
+    let save_draft_res = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/api/v1/admin/posts/{}/draft", post_id))
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::COOKIE, format!("blog_access={}", access))
+                .header("x-csrf-token", &csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "content_md": huge_content,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(save_draft_res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

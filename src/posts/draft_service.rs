@@ -59,6 +59,7 @@ pub async fn save_post_draft(
         None => existing.summary.clone(),
     };
     let content_md = dto.content_md.unwrap_or(existing.content_md);
+    validate_content(&content_md, PostStatus::Draft)?;
     let content_html = markdown::render_and_sanitize(&content_md);
     let featured_image = dto
         .featured_image_media_id
