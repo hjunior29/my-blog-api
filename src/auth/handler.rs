@@ -99,17 +99,18 @@ pub async fn login(
         };
 
         let email_service = EmailService::new(config.clone());
-        email_service
-            .send_two_factor_code(&user.email, &code)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "failed to send 2FA email");
-                ApiError::new(
-                    StatusCode::BAD_GATEWAY,
-                    "email_delivery_failed",
-                    "Failed to deliver verification email",
-                )
-            })?;
+        if let Err(e) = email_service.send_two_factor_code(&user.email, &code).await {
+            tracing::error!(error = %e, "failed to send 2FA email");
+            let _ = sqlx::query("DELETE FROM auth_two_factor_challenges WHERE id = ?")
+                .bind(&challenge_token)
+                .execute(&pool)
+                .await;
+            return Err(ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "email_delivery_failed",
+                "Failed to deliver verification email",
+            ));
+        }
 
         let response_body = LoginResultResponse::TwoFactorRequired(TwoFactorChallengeResponse {
             requires_2fa: true,

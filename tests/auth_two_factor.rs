@@ -383,3 +383,41 @@ async fn two_factor_locked_challenge_still_enforces_cooldown() {
     let body = json_body(res_locked).await;
     assert_eq!(body["error"]["code"], "cooldown_active");
 }
+
+#[tokio::test]
+async fn two_factor_verify_enforces_ip_rate_limiting() {
+    let (_pool, _, app, _dir) = test_app().await;
+
+    let payload = serde_json::to_vec(&VerifyTwoFactorRequest {
+        challenge_token: "test-token".into(),
+        code: "123456".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    for _ in 0..10 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/2fa/verify")
+            .header(header::ORIGIN, "http://localhost:3000")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(payload.clone()))
+            .unwrap();
+
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    let req_11 = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/2fa/verify")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+
+    let res_11 = app.oneshot(req_11).await.unwrap();
+    assert_eq!(res_11.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = json_body(res_11).await;
+    assert_eq!(body["error"]["code"], "rate_limit_exceeded");
+}

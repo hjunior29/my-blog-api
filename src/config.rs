@@ -183,6 +183,18 @@ impl Config {
             _ => env != AppEnv::Test,
         };
 
+        if env == AppEnv::Production && two_factor_enabled {
+            if smtp_host.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(ConfigError("SMTP_HOST"));
+            }
+            if smtp_username.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(ConfigError("SMTP_USERNAME"));
+            }
+            if smtp_password.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(ConfigError("SMTP_PASSWORD"));
+            }
+        }
+
         Ok(Self {
             env,
             bind_address,
@@ -277,5 +289,15 @@ mod tests {
         .err()
         .unwrap();
         assert_eq!(error.to_string(), "invalid configuration for JWT_KEYS_FILE");
+
+        let error = Config::from_lookup(|name| match name {
+            "APP_ENV" => Ok(Some("production".into())),
+            "SECURE_COOKIES" => Ok(Some("true".into())),
+            "JWT_SECRET" => Ok(Some("production-secret-must-be-very-long-and-secure!".into())),
+            _ => Ok(None),
+        })
+        .err()
+        .unwrap();
+        assert_eq!(error.to_string(), "invalid configuration for SMTP_HOST");
     }
 }

@@ -30,7 +30,11 @@ impl EmailService {
 
     pub async fn send_two_factor_code(&self, to_email: &str, code: &str) -> Result<(), EmailError> {
         if self.config.env == AppEnv::Test || self.config.smtp_host.is_none() {
-            tracing::info!(to = %to_email, code = %code, "2FA verification code generated (local/mock delivery)");
+            if self.config.env == AppEnv::Development || self.config.env == AppEnv::Test {
+                tracing::info!(to = %to_email, code = %code, "2FA verification code generated (local/mock delivery)");
+            } else {
+                tracing::info!(to = %to_email, "2FA verification code generated");
+            }
             return Ok(());
         }
 

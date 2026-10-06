@@ -27,10 +27,16 @@ use crate::{
 pub async fn verify_two_factor(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
+    State(rate_limiter): State<crate::auth::LoginRateLimiter>,
+    client_ip: crate::auth::rate_limit::ClientIp,
     headers: HeaderMap,
     Json(payload): Json<VerifyTwoFactorRequest>,
 ) -> Result<Response, ApiError> {
     let now = current_unix_time();
+    let ip = crate::auth::rate_limit::extract_client_ip(&headers, client_ip.0);
+    if let Err(retry_after) = rate_limiter.check_and_record(&ip, now) {
+        return Err(ApiError::too_many_requests(Some(retry_after as u64)));
+    }
     let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
 
     let verify_res = match two_factor::verify_challenge(
@@ -133,9 +139,16 @@ pub async fn verify_two_factor(
 pub async fn resend_two_factor(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
+    State(rate_limiter): State<crate::auth::LoginRateLimiter>,
+    client_ip: crate::auth::rate_limit::ClientIp,
+    headers: HeaderMap,
     Json(payload): Json<ResendTwoFactorRequest>,
 ) -> Result<Response, ApiError> {
     let now = current_unix_time();
+    let ip = crate::auth::rate_limit::extract_client_ip(&headers, client_ip.0);
+    if let Err(retry_after) = rate_limiter.check_and_record(&ip, now) {
+        return Err(ApiError::too_many_requests(Some(retry_after as u64)));
+    }
 
     let (challenge_token, new_code, user) = {
         let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;

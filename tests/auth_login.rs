@@ -260,6 +260,7 @@ async fn hsts_header_present_in_production_environment() {
         "APP_ORIGIN" => Ok(Some("https://blog.example.com".into())),
         "SECURE_COOKIES" => Ok(Some("true".into())),
         "JWT_SECRET" => Ok(Some("production-secret-must-be-very-long-and-secure!".into())),
+        "TWO_FACTOR_ENABLED" => Ok(Some("false".into())),
         _ => Ok(None),
     })
     .unwrap();
