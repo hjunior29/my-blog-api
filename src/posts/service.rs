@@ -239,9 +239,12 @@ pub async fn list_published_posts(
     let total = repository::count_published(pool).await?;
     let posts = repository::list_published(pool, limit, offset).await?;
 
+    let post_ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
+    let mut tags_by_post = repository::get_tags_for_posts_batch(pool, &post_ids).await?;
+
     let mut items = Vec::with_capacity(posts.len());
     for post in posts {
-        let tags = repository::get_tags_for_post(pool, post.id).await?;
+        let tags = tags_by_post.remove(&post.id).unwrap_or_default();
         let pwt = PostWithTags { post, tags };
         items.push(PostSummaryResponse::from(&pwt));
     }
@@ -279,9 +282,12 @@ pub async fn search_published_posts(
     let total = repository::count_search_published_fts(pool, &sanitized, &like_query).await?;
     let posts = repository::search_published_fts(pool, &sanitized, &like_query, limit, offset).await?;
 
+    let post_ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
+    let mut tags_by_post = repository::get_tags_for_posts_batch(pool, &post_ids).await?;
+
     let mut items = Vec::with_capacity(posts.len());
     for post in posts {
-        let tags = repository::get_tags_for_post(pool, post.id).await?;
+        let tags = tags_by_post.remove(&post.id).unwrap_or_default();
         let pwt = PostWithTags { post, tags };
         items.push(PostSummaryResponse::from(&pwt));
     }
@@ -321,9 +327,12 @@ pub async fn list_admin_posts(
     let total = repository::count_posts_admin(pool, author_id, status).await?;
     let posts = repository::list_posts_admin(pool, author_id, status, limit, offset).await?;
 
+    let post_ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
+    let mut tags_by_post = repository::get_tags_for_posts_batch(pool, &post_ids).await?;
+
     let mut items = Vec::with_capacity(posts.len());
     for post in posts {
-        let tags = repository::get_tags_for_post(pool, post.id).await?;
+        let tags = tags_by_post.remove(&post.id).unwrap_or_default();
         let pwt = PostWithTags { post, tags };
         items.push(PostSummaryResponse::from(&pwt));
     }

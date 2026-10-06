@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use sqlx::{SqliteConnection, SqlitePool};
 
 use super::model::{Post, PostStatus, Tag};
@@ -183,6 +185,47 @@ pub async fn get_tags_for_post(pool: &SqlitePool, post_id: i64) -> Result<Vec<Ta
     .bind(post_id)
     .fetch_all(pool)
     .await
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct PostTagRow {
+    post_id: i64,
+    id: i64,
+    name: String,
+    slug: String,
+    created_at: i64,
+}
+
+pub async fn get_tags_for_posts_batch(
+    pool: &SqlitePool,
+    post_ids: &[i64],
+) -> Result<HashMap<i64, Vec<Tag>>, sqlx::Error> {
+    if post_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut builder: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+        "SELECT pt.post_id, t.id, t.name, t.slug, t.created_at FROM tags t JOIN post_tags pt ON pt.tag_id = t.id WHERE pt.post_id IN ("
+    );
+    let mut separated = builder.separated(", ");
+    for id in post_ids {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(") ORDER BY t.name ASC");
+
+    let rows: Vec<PostTagRow> = builder.build_query_as().fetch_all(pool).await?;
+
+    let mut map: HashMap<i64, Vec<Tag>> = HashMap::with_capacity(post_ids.len());
+    for row in rows {
+        map.entry(row.post_id).or_default().push(Tag {
+            id: row.id,
+            name: row.name,
+            slug: row.slug,
+            created_at: row.created_at,
+        });
+    }
+
+    Ok(map)
 }
 
 pub async fn list_published(
