@@ -87,7 +87,7 @@ impl LoginRateLimiter {
         Ok(())
     }
 
-    pub fn record_account_failure(&self, email: &str, now: i64) {
+    pub fn record_account_failure(&self, email: &str, now: i64) -> usize {
         if let Ok(mut map) = self.account_lockouts.lock() {
             if map.len() > ACCOUNT_LOCKOUT_MAX_TRACKED {
                 map.retain(|_, state| {
@@ -98,9 +98,9 @@ impl LoginRateLimiter {
             let state = map.entry(email.to_string()).or_default();
             state.failures.retain(|&ts| now - ts < ACCOUNT_LOCKOUT_WINDOW_SECS);
             state.failures.push(now);
-            if state.failures.len() >= ACCOUNT_LOCKOUT_MAX_FAILURES {
-                state.locked_until = Some(now + ACCOUNT_LOCKOUT_DURATION_SECS);
-            }
+            state.failures.len()
+        } else {
+            1
         }
     }
 

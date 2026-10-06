@@ -56,10 +56,6 @@ pub async fn login(
         return Err(ApiError::invalid_credentials());
     }
 
-    if let Err(retry_after) = rate_limiter.check_account_lockout(&normalized, now) {
-        return Err(ApiError::too_many_requests(Some(retry_after as u64)));
-    }
-
     let _hash_guard = rate_limiter
         .acquire_active_hash(&ip)
         .map_err(|retry_after| ApiError::too_many_requests(Some(retry_after as u64)))?;
@@ -71,7 +67,9 @@ pub async fn login(
     };
 
     if !is_valid {
-        rate_limiter.record_account_failure(&normalized, now);
+        let failures = rate_limiter.record_account_failure(&normalized, now);
+        let delay_secs = failures.clamp(1, 3);
+        tokio::time::sleep(std::time::Duration::from_secs(delay_secs as u64)).await;
         return Err(ApiError::invalid_credentials());
     }
 
@@ -134,7 +132,7 @@ pub async fn login(
 
     let mut conn = pool.acquire().await.map_err(|_| ApiError::internal())?;
     let (session, raw_refresh_token) =
-        session::create_session(&mut conn, user.id, user_agent, None, remember_me, now)
+        session::create_session(&mut conn, user.id, user_agent, Some(&ip), remember_me, now)
             .await
             .map_err(|_| ApiError::internal())?;
 

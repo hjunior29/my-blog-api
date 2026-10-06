@@ -102,7 +102,7 @@ pub async fn verify_two_factor(
     let remember_me = payload.remember_me.unwrap_or(verify_res.remember_me);
 
     let (session, raw_refresh_token) =
-        session::create_session(&mut conn, user.id, user_agent, None, remember_me, now)
+        session::create_session(&mut conn, user.id, user_agent, Some(&ip), remember_me, now)
             .await
             .map_err(|_| ApiError::internal())?;
 

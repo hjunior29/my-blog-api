@@ -262,7 +262,7 @@ async fn login_rate_limiting_blocks_after_max_attempts() {
 }
 
 #[tokio::test]
-async fn account_lockout_blocks_owner_after_consecutive_failures_across_ips() {
+async fn owner_with_correct_password_advances_even_after_failed_attempts() {
     let (pool, _, app, _dir) = test_app().await;
     user_service::seed_owner(&pool, "owner@example.com", "Owner", "ValidOwnerPass123!")
         .await
@@ -290,20 +290,31 @@ async fn account_lockout_blocks_owner_after_consecutive_failures_across_ips() {
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
-    let new_ip = "198.51.100.99";
-    let req_locked = Request::builder()
+    let correct_payload = serde_json::to_vec(&LoginRequest {
+        email: "owner@example.com".into(),
+        password: "ValidOwnerPass123!".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    let login_ip = "198.51.100.99";
+    let req_correct = Request::builder()
         .method("POST")
         .uri("/api/v1/auth/login")
         .header(header::ORIGIN, "http://localhost:3000")
-        .header("x-forwarded-for", new_ip)
+        .header("x-forwarded-for", login_ip)
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(wrong_payload))
+        .body(Body::from(correct_payload))
         .unwrap();
 
-    let res_locked = app.oneshot(req_locked).await.unwrap();
-    assert_eq!(res_locked.status(), StatusCode::TOO_MANY_REQUESTS);
-    let body = json_body(res_locked).await;
-    assert_eq!(body["error"]["code"], "rate_limit_exceeded");
+    let res_correct = app.oneshot(req_correct).await.unwrap();
+    assert_eq!(res_correct.status(), StatusCode::OK);
+
+    let session_row: (Option<String>,) = sqlx::query_as("SELECT ip_address FROM auth_sessions LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(session_row.0, Some(login_ip.to_string()));
 }
 
 #[tokio::test]
