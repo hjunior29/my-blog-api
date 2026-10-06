@@ -169,14 +169,14 @@ pub fn extract_client_ip(headers: &HeaderMap, peer_addr: Option<std::net::Socket
         }
     }
 
-    if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
-        let trimmed = fly_ip.trim();
+    if let Some(cf_ip) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
+        let trimmed = cf_ip.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
-    if let Some(cf_ip) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
-        let trimmed = cf_ip.trim();
+    if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
+        let trimmed = fly_ip.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
@@ -287,6 +287,16 @@ mod tests {
 
         let trusted = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         assert_eq!(extract_client_ip(&headers, Some(trusted)), "198.51.100.77");
+    }
+
+    #[test]
+    fn cloudflare_ip_takes_precedence_over_fly_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.1"));
+        headers.insert("fly-client-ip", HeaderValue::from_static("198.51.100.2"));
+
+        let trusted = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        assert_eq!(extract_client_ip(&headers, Some(trusted)), "203.0.113.1");
     }
 
     #[test]
