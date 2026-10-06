@@ -366,4 +366,12 @@ async fn tigris_storage_redirects_media_downloads() {
         res.headers().get(header::LOCATION).unwrap(),
         "https://fly.storage.tigris.dev/blog-assets/tigris-vid-123/video.mp4"
     );
+    assert_eq!(
+        res.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+        "nosniff"
+    );
+    assert_eq!(
+        res.headers().get("content-security-policy").unwrap(),
+        "default-src 'none'; sandbox"
+    );
 }

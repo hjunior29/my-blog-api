@@ -160,7 +160,16 @@ async fn get_media_by_id_internal(
 
     let (content_type, body) = match storage {
         StorageBackend::Tigris(_) => {
-            return Ok(Redirect::temporary(&media.public_url).into_response());
+            let mut response = Redirect::temporary(&media.public_url).into_response();
+            response.headers_mut().insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                header::HeaderValue::from_static("nosniff"),
+            );
+            response.headers_mut().insert(
+                header::HeaderName::from_static("content-security-policy"),
+                header::HeaderValue::from_static("default-src 'none'; sandbox"),
+            );
+            return Ok(response);
         }
         StorageBackend::Local(local) => {
             let (content_type, file) = local
