@@ -43,27 +43,26 @@ pub async fn login(
 
     let normalized = match normalize_email(&payload.email) {
         Ok(e) => e,
-        Err(_) => match password::dummy_verify(payload.password).await {
-            Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
-            _ => return Err(ApiError::invalid_credentials()),
-        },
+        Err(_) => return Err(ApiError::invalid_credentials()),
     };
 
     let user = match repository::find_by_normalized_email(&pool, &normalized).await {
         Ok(Some(u)) => u,
-        Ok(None) => match password::dummy_verify(payload.password).await {
-            Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
-            _ => return Err(ApiError::invalid_credentials()),
-        },
+        Ok(None) => return Err(ApiError::invalid_credentials()),
         Err(_) => return Err(ApiError::internal()),
     };
 
     if user.status != UserStatus::Active || (config.owner_only && user.role != UserRole::Owner) {
-        match password::dummy_verify(payload.password).await {
-            Err(password::PasswordError::Busy) => return Err(ApiError::too_many_requests(Some(5))),
-            _ => return Err(ApiError::invalid_credentials()),
-        }
+        return Err(ApiError::invalid_credentials());
     }
+
+    if let Err(retry_after) = rate_limiter.check_account_lockout(&normalized, now) {
+        return Err(ApiError::too_many_requests(Some(retry_after as u64)));
+    }
+
+    let _hash_guard = rate_limiter
+        .acquire_active_hash(&ip)
+        .map_err(|retry_after| ApiError::too_many_requests(Some(retry_after as u64)))?;
 
     let is_valid = match password::verify_password(payload.password, user.password_hash.clone()).await {
         Ok(valid) => valid,
@@ -72,8 +71,11 @@ pub async fn login(
     };
 
     if !is_valid {
+        rate_limiter.record_account_failure(&normalized, now);
         return Err(ApiError::invalid_credentials());
     }
+
+    rate_limiter.record_account_success(&normalized);
 
     let now = current_unix_time();
     let remember_me = payload.remember_me.unwrap_or(false);

@@ -198,21 +198,21 @@ async fn login_rate_limiting_blocks_after_max_attempts() {
     let attacker_ip = "198.51.100.50";
     let different_ip = "198.51.100.51";
 
-    let wrong_payload = serde_json::to_vec(&LoginRequest {
-        email: "rate@example.com".into(),
-        password: "WrongPassword123!".into(),
-        remember_me: None,
-    })
-    .unwrap();
+    for i in 0..10 {
+        let payload = serde_json::to_vec(&LoginRequest {
+            email: format!("user{}@example.com", i),
+            password: "WrongPassword123!".into(),
+            remember_me: None,
+        })
+        .unwrap();
 
-    for _ in 0..10 {
         let req = Request::builder()
             .method("POST")
             .uri("/api/v1/auth/login")
             .header(header::ORIGIN, "http://localhost:3000")
             .header("x-forwarded-for", attacker_ip)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(wrong_payload.clone()))
+            .body(Body::from(payload))
             .unwrap();
 
         let res = app.clone().oneshot(req).await.unwrap();
@@ -225,7 +225,14 @@ async fn login_rate_limiting_blocks_after_max_attempts() {
         .header(header::ORIGIN, "http://localhost:3000")
         .header("x-forwarded-for", attacker_ip)
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(wrong_payload.clone()))
+        .body(Body::from(
+            serde_json::to_vec(&LoginRequest {
+                email: "user99@example.com".into(),
+                password: "WrongPassword123!".into(),
+                remember_me: None,
+            })
+            .unwrap(),
+        ))
         .unwrap();
 
     let res_blocked = app.clone().oneshot(req_blocked).await.unwrap();
@@ -240,11 +247,63 @@ async fn login_rate_limiting_blocks_after_max_attempts() {
         .header(header::ORIGIN, "http://localhost:3000")
         .header("x-forwarded-for", different_ip)
         .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&LoginRequest {
+                email: "user99@example.com".into(),
+                password: "WrongPassword123!".into(),
+                remember_me: None,
+            })
+            .unwrap(),
+        ))
+        .unwrap();
+
+    let res_other = app.clone().oneshot(req_other).await.unwrap();
+    assert_eq!(res_other.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn account_lockout_blocks_owner_after_consecutive_failures_across_ips() {
+    let (pool, _, app, _dir) = test_app().await;
+    user_service::seed_owner(&pool, "owner@example.com", "Owner", "ValidOwnerPass123!")
+        .await
+        .unwrap();
+
+    let wrong_payload = serde_json::to_vec(&LoginRequest {
+        email: "owner@example.com".into(),
+        password: "WrongPassword123!".into(),
+        remember_me: None,
+    })
+    .unwrap();
+
+    for i in 0..5 {
+        let ip = format!("198.51.100.{}", 10 + i);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header(header::ORIGIN, "http://localhost:3000")
+            .header("x-forwarded-for", ip)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(wrong_payload.clone()))
+            .unwrap();
+
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    let new_ip = "198.51.100.99";
+    let req_locked = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::ORIGIN, "http://localhost:3000")
+        .header("x-forwarded-for", new_ip)
+        .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(wrong_payload))
         .unwrap();
 
-    let res_other = app.oneshot(req_other).await.unwrap();
-    assert_eq!(res_other.status(), StatusCode::UNAUTHORIZED);
+    let res_locked = app.oneshot(req_locked).await.unwrap();
+    assert_eq!(res_locked.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = json_body(res_locked).await;
+    assert_eq!(body["error"]["code"], "rate_limit_exceeded");
 }
 
 #[tokio::test]
