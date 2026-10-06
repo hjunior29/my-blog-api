@@ -68,6 +68,13 @@ impl LocalStorage {
         Ok(format!("{}/api/v1/media/{}", origin, key))
     }
 
+    pub async fn open_file(&self, key: &str) -> Result<(String, fs::File), StorageError> {
+        let path = self.resolve_safe_path(key)?;
+        let file = fs::File::open(&path).await?;
+        let mime = mime_guess(key);
+        Ok((mime.to_string(), file))
+    }
+
     pub async fn get_object(&self, key: &str) -> Result<(String, Vec<u8>), StorageError> {
         let path = self.resolve_safe_path(key)?;
         let data = fs::read(&path).await?;
@@ -79,6 +86,12 @@ impl LocalStorage {
         if let Ok(path) = self.resolve_safe_path(key) {
             if path.exists() {
                 fs::remove_file(&path).await?;
+                if let Some(parent) = path.parent() {
+                    let canonical_root = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
+                    if parent != canonical_root && parent.starts_with(&canonical_root) {
+                        let _ = fs::remove_dir(parent).await;
+                    }
+                }
             }
         }
         Ok(())

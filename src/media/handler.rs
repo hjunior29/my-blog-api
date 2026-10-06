@@ -1,8 +1,9 @@
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
 };
+use tokio_util::io::ReaderStream;
 use sqlx::SqlitePool;
 
 use super::{
@@ -157,12 +158,21 @@ async fn get_media_by_id_internal(
         }
     };
 
-    let (content_type, data) = storage
-        .get_object(&media.storage_key)
-        .await
-        .map_err(|_| ApiError::not_found("Media object not found"))?;
+    let (content_type, body) = match storage {
+        StorageBackend::Tigris(_) => {
+            return Ok(Redirect::temporary(&media.public_url).into_response());
+        }
+        StorageBackend::Local(local) => {
+            let (content_type, file) = local
+                .open_file(&media.storage_key)
+                .await
+                .map_err(|_| ApiError::not_found("Media object not found"))?;
+            let stream = ReaderStream::new(file);
+            (content_type, axum::body::Body::from_stream(stream))
+        }
+    };
 
-    let mut response = (StatusCode::OK, data).into_response();
+    let mut response = (StatusCode::OK, body).into_response();
     if let Ok(val) = header::HeaderValue::from_str(&content_type) {
         response.headers_mut().insert(header::CONTENT_TYPE, val);
     }

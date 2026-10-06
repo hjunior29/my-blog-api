@@ -181,6 +181,8 @@ async fn upload_image_video_and_audio_succeeds() {
         get_res.headers().get(header::CONTENT_TYPE).unwrap(),
         "image/png"
     );
+    let get_bytes = to_bytes(get_res.into_body(), 64 * 1024).await.unwrap();
+    assert_eq!(&get_bytes[..], b"\x89PNG\r\n\x1a\nfakeimage");
 
     let get_with_name_req = Request::get(format!("/api/v1/media/{image_id}/cover.png"))
         .body(Body::empty())
@@ -305,4 +307,63 @@ async fn rejects_unsupported_media_formats() {
 
     let spoofed_mp4_res = app.oneshot(spoofed_mp4_req).await.unwrap();
     assert_eq!(spoofed_mp4_res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[tokio::test]
+async fn tigris_storage_redirects_media_downloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tigris_media_test.db");
+    let url = format!("sqlite://{}", db_path.display());
+    let pool = database::connect(&url, 4).await.unwrap();
+
+    let config = Config::from_lookup(|key| match key {
+        "OWNER_ONLY" => Ok(Some("false".into())),
+        "APP_ENV" => Ok(Some("test".into())),
+        "APP_ORIGIN" => Ok(Some("http://localhost:3000".into())),
+        "SECURE_COOKIES" => Ok(Some("false".into())),
+        "MEDIA_ROOT" => Ok(Some("./uploads".into())),
+        "JWT_SECRET" => Ok(Some("test-jwt-secret-key-must-be-at-least-32-bytes!".into())),
+        "BUCKET_NAME" => Ok(Some("blog-assets".into())),
+        "AWS_ACCESS_KEY_ID" => Ok(Some("mock-access-key".into())),
+        "AWS_SECRET_ACCESS_KEY" => Ok(Some("mock-secret-key".into())),
+        _ => Ok(None),
+    })
+    .unwrap();
+
+    let uploader_id = match user_service::seed_owner(&pool, "owner@blog.local", "Owner", "Owner Pass 1234!")
+        .await
+        .unwrap()
+    {
+        user_service::SeedResult::Created(id) | user_service::SeedResult::AlreadyExists(id) => id,
+    };
+
+    let now = 1700000000i64;
+    sqlx::query(
+        "INSERT INTO media (id, filename, content_type, media_kind, size_bytes, storage_key, storage_backend, public_url, uploader_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("tigris-vid-123")
+    .bind("video.mp4")
+    .bind("video/mp4")
+    .bind("video")
+    .bind(50_000_000i64)
+    .bind("tigris-vid-123/video.mp4")
+    .bind("tigris")
+    .bind("https://fly.storage.tigris.dev/blog-assets/tigris-vid-123/video.mp4")
+    .bind(uploader_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = router_with_config(pool, config);
+    let req = Request::get("/api/v1/media/tigris-vid-123")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        res.headers().get(header::LOCATION).unwrap(),
+        "https://fly.storage.tigris.dev/blog-assets/tigris-vid-123/video.mp4"
+    );
 }
