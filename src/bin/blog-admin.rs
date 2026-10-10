@@ -1,13 +1,20 @@
 use std::{
-    env,
+    env, fs,
     io::{self, IsTerminal},
+    path::Path,
     process::ExitCode,
 };
 
 use my_blog_api::{
     config::Config,
     database,
-    posts::{dto::CreatePostDto, model::PostStatus, service as post_service},
+    posts::{
+        dto::{CreatePostDto, UpdatePostDto},
+        model::PostStatus,
+        repository as post_repo,
+        service as post_service,
+        slug,
+    },
     users::{
         model::UserRole,
         service::{self, SeedResult},
@@ -141,101 +148,130 @@ async fn handle_seed_posts(pool: &sqlx::SqlitePool) -> Result<(), String> {
         None => return Err("No active owner found. Please run `seed-owner` first.".into()),
     };
 
-    struct SamplePost {
-        title: &'static str,
-        summary: &'static str,
-        content_md: &'static str,
-        status: PostStatus,
-        tags: &'static [&'static str],
-        book_color: Option<&'static str>,
+    let seeds_dir = Path::new("seeds");
+    if !seeds_dir.is_dir() {
+        return Err("Seeds directory 'seeds' not found.".into());
     }
 
-    let samples: [SamplePost; 6] = [
-        SamplePost {
-            title: "Construindo Sistemas com Rust e SolidJS: Desempenho e Simplicidade",
-            summary: "Uma reflexao pratica sobre a combinacao de um backend robusto em Rust com o modelo reativo de grano fino do SolidJS.",
-            content_md: "Ao desenhar a arquitetura deste blog pessoal, o objetivo central foi unir **desempenho intransigente** e uma experiencia de desenvolvimento simples.\n\n### Por que Rust no Backend?\n\nO uso do ecossistema Axum e Tokio com SQLite embutido nos proporciona:\n- **Consumo de memoria infimo:** O processo consome poucos megabytes em repouso.\n- **Concorrencia segura:** Verificacao estrita em tempo de compilacao.\n- **Tipagem de ponta a ponta:** DTOs com validacoes claras e sem suposicoes.\n\n```rust\n// Exemplo conceitual do pipeline\npub async fn get_post_by_slug(pool: &SqlitePool, slug: &str) -> Result<Post, PostError> {\n    repository::find_by_slug(pool, slug).await\n}\n```\n\n### A Escolha do SolidJS\n\nDiferente de frameworks com Virtual DOM pesados, o SolidJS compila diretamente para nos reativos do DOM:\n1. Sem reconciliacao continua e sem overhead de diffing.\n2. Estado granular que atualiza estritamente o no afetado.\n3. Bundle inicial compacto (< 60 KiB gzipped).\n\nO resultado e uma leitura fluida e navegacao instantanea.",
-            status: PostStatus::Published,
-            tags: &["Rust", "SolidJS", "Arquitetura", "Web"],
-            book_color: Some("#2d4a3e"),
-        },
-        SamplePost {
-            title: "Principios de um Design System Editorial Focado em Tipografia",
-            summary: "Como equilibrar atmosfera estetica acolhedora, contraste WCAG AAA e tipografia proporcional inspirada em livros e papel.",
-            content_md: "O design visual de um blog tecnico e reflexivo nao deve competir com o conteudo, mas sim acolhe-lo.\n\n> \"A boa tipografia e como um vidro transparente: voce le o que esta por tras sem perceber a lente.\"\n\n### Escolhas Tipograficas\n\nAdotamos uma hierarquia que valoriza a legibilidade:\n- **Newsreader:** Uma serifa editorial elegante para titulos e destaques.\n- **Manrope:** Sans-serif geometrica para o corpo de texto e controles.\n- **Geist Mono:** Monospace cirurgica para metadados e codigo.\n\n### Cores e Texturas\n\nTrabalhamos com uma paleta inspirada em materiais fisicos:\n- Fundo papel quente (*warm paper*) que evita a fadiga do branco puro.\n- Tinta profunda (*deep ink*) mantendo contraste adequado em temas claro e escuro.\n- Acentos terracota sutis para guiar a atencao com harmonia.",
-            status: PostStatus::Published,
-            tags: &["Design System", "CSS", "Tipografia", "Acessibilidade"],
-            book_color: Some("#a74832"),
-        },
-        SamplePost {
-            title: "SQLite em Producao: Por Que Bancos Embutidos Fazem Sentido",
-            summary: "Desmistificando o uso do SQLite em servicos web modernos com WAL mode e transacoes ACID locais.",
-            content_md: "Por muitos anos, a convencao padrao para qualquer aplicacao web foi subir um servidor de banco de dados separado, mesmo para sites de trafego moderado ou blogs pessoais.\n\n### As Vantagens do SQLite Moderno\n\nCom as opcoes corretas, o SQLite e uma escolha extraordinaria:\n- **Zero latencia de rede:** Consultas executam no mesmo processo, sem round-trip TCP.\n- **WAL (Write-Ahead Logging):** Leitores concorrentes nao bloqueiam escritores.\n- **Backup simplificado:** Um unico arquivo persistente que pode ser versionado ou copiado.\n- **FTS5 Integrado:** Busca textual completa sem servicos externos pesados.\n\n### Configuracao Recomendada\n\n```sql\nPRAGMA journal_mode = WAL;\nPRAGMA synchronous = FULL;\nPRAGMA foreign_keys = ON;\nPRAGMA busy_timeout = 5000;\n```\n\nEssa simplicidade reduz a complexidade operacional e os custos a praticamente zero.",
-            status: PostStatus::Published,
-            tags: &["SQLite", "Banco de Dados", "Rust", "Performance"],
-            book_color: Some("#2e3a59"),
-        },
-        SamplePost {
-            title: "Seguranca Pragmatica em APIs: Sessoes HttpOnly sem Complexidade",
-            summary: "A estrategia de tokens JWT de curta duracao, cookies seguros e protecao contra CSRF em arquiteturas modernas.",
-            content_md: "A seguranca nao deve ser nem negligenciada nem transformada em um labirinto impraticavel.\n\n### Estrategia de Sessao Adotada\n\nOptamos pelo equilibrio entre robustez e facilidade operacional:\n1. **Cookies HttpOnly e SameSite=Lax:** O JavaScript do navegador nunca tem acesso direto aos tokens de autenticacao.\n2. **Access Token curto + Refresh Rotativo:** O access token expira rapidamente e a rotatividade detecta tentativas de reuso.\n3. **Verificacao de Origem e CSRF:** Qualquer mutacao valida a origem exata e exige token CSRF em memoria.\n\nDessa forma, mantemos o blog seguro sem depender de middlewares opacos.",
-            status: PostStatus::Published,
-            tags: &["Seguranca", "Backend", "Web"],
-            book_color: Some("#8a4f20"),
-        },
-        SamplePost {
-            title: "Otimizando a Performance Web do Inicio ao Fim",
-            summary: "Metricas Core Web Vitals, carregamento sob demanda e tecnicas para entregar paginas em menos de 100 milissegundos.",
-            content_md: "Velocidade e uma funcionalidade essencial para qualquer produto digital.\n\n### Estrategias Essenciais\n\nPara atingir pontuacoes maximas nos Core Web Vitals (LCP, INP, CLS):\n- **Eliminacao de CSS nao utilizado:** Menos de 60 KB de estilos totais.\n- **SVG Inlined e Otimizado:** Icones leves sem requisicoes de rede extras.\n- **Fontes com preload:** Evita flashes de texto invisivel (FOIT).\n- **Zero Empty States:** Cada transicao de tela possui esqueletos e feedbacks claros.\n\nQuando cada milissegundo conta, a leitura ganha fluidez natural.",
-            status: PostStatus::Published,
-            tags: &["Performance", "Web", "JavaScript"],
-            book_color: Some("#5a3d5c"),
-        },
-        SamplePost {
-            title: "Proximos Passos: Suporte a Midias e Workers de Agendamento",
-            summary: "Rascunho de planejamento das proximas melhorias no blog, incluindo upload de capas e rotinas em background.",
-            content_md: "Anotacoes e roadmap para os proximos ciclos de desenvolvimento:\n\n- [ ] Upload multipart autenticado para imagens de capa e ilustracoes.\n- [ ] Worker em background para transicao automatica de posts agendados.\n- [ ] Feeds RSS e Atom para distribuicao aberta de conteudo.\n\n*Este artigo e um rascunho de trabalho visivel apenas no painel administrativo.*",
-            status: PostStatus::Draft,
-            tags: &["Roadmap", "DevOps"],
-            book_color: Some("#3d5a5b"),
-        },
-    ];
+    let mut entries: Vec<_> = fs::read_dir(seeds_dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    entries.sort_by_key(|e| e.path());
 
-    for item in samples {
-        let base_slug = my_blog_api::posts::slug::generate_slug(item.title);
-        if my_blog_api::posts::repository::slug_exists(pool, &base_slug)
-            .await
-            .unwrap_or(false)
-        {
-            println!("Post already exists, skipping: '{}'", item.title);
-            continue;
-        }
-
-        let dto = CreatePostDto {
-            title: item.title.to_string(),
-            summary: Some(item.summary.to_string()),
-            content_md: item.content_md.to_string(),
-            featured_image_media_id: None,
-            status: Some(item.status),
-            tags: Some(item.tags.iter().map(|&s| s.to_string()).collect()),
-            scheduled_for: None,
-            book_color: item.book_color.map(ToString::to_string),
+    for entry in entries {
+        let content = fs::read_to_string(entry.path()).map_err(|e| e.to_string())?;
+        let seed = match parse_seed_markdown(&content) {
+            Some(s) => s,
+            None => {
+                eprintln!("Skipping invalid seed format: {:?}", entry.path());
+                continue;
+            }
         };
 
-        match post_service::create_post(pool, owner_id, dto).await {
-            Ok(created) => {
-                println!(
-                    "Created post: '{}' (slug: {}, status: {:?})",
-                    created.post.title, created.post.slug, created.post.status
-                );
+        let base_slug = slug::generate_slug(&seed.title);
+        if let Ok(Some(existing)) = post_repo::find_post_by_slug(pool, &base_slug).await {
+            let update_dto = UpdatePostDto {
+                title: Some(seed.title.clone()),
+                summary: Some(seed.summary.clone()),
+                content_md: Some(seed.content_md.clone()),
+                featured_image_media_id: seed.cover.clone(),
+                status: Some(seed.status),
+                tags: Some(seed.tags.clone()),
+                scheduled_for: None,
+                book_color: seed.book_color.clone(),
+                version: existing.version,
+            };
+            match post_service::update_post(pool, existing.id, update_dto).await {
+                Ok(_) => println!("Updated seed post: '{}' (slug: {})", seed.title, base_slug),
+                Err(e) => eprintln!("Failed to update post '{}': {e}", seed.title),
             }
-            Err(e) => {
-                eprintln!("Failed to create post '{}': {e}", item.title);
+        } else {
+            let create_dto = CreatePostDto {
+                title: seed.title.clone(),
+                summary: Some(seed.summary.clone()),
+                content_md: seed.content_md.clone(),
+                featured_image_media_id: seed.cover.clone(),
+                status: Some(seed.status),
+                tags: Some(seed.tags.clone()),
+                scheduled_for: None,
+                book_color: seed.book_color.clone(),
+            };
+            match post_service::create_post(pool, owner_id, create_dto).await {
+                Ok(c) => println!("Created seed post: '{}' (slug: {})", c.post.title, c.post.slug),
+                Err(e) => eprintln!("Failed to create post '{}': {e}", seed.title),
             }
         }
     }
 
     Ok(())
+}
+
+struct SeedPost {
+    title: String,
+    summary: String,
+    content_md: String,
+    cover: Option<String>,
+    tags: Vec<String>,
+    book_color: Option<String>,
+    status: PostStatus,
+}
+
+fn parse_seed_markdown(raw: &str) -> Option<SeedPost> {
+    if !raw.starts_with("---") {
+        return None;
+    }
+    let parts: Vec<&str> = raw.splitn(3, "---").collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let meta = parts[1];
+    let body = parts[2].trim();
+
+    let mut title = String::new();
+    let mut summary = String::new();
+    let mut cover = None;
+    let mut tags = Vec::new();
+    let mut book_color = None;
+    let mut status = PostStatus::Published;
+
+    for line in meta.lines() {
+        let line = line.trim();
+        if let Some((k, v)) = line.split_once(':') {
+            let key = k.trim();
+            let val = v.trim().trim_matches('"').trim_matches('\'');
+            match key {
+                "title" => title = val.to_string(),
+                "summary" => summary = val.to_string(),
+                "cover" => cover = Some(val.to_string()),
+                "tags" => {
+                    tags = val
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+                "book_color" => book_color = Some(val.to_string()),
+                "status" if val == "draft" => status = PostStatus::Draft,
+                _ => {}
+            }
+        }
+    }
+
+    if title.is_empty() {
+        return None;
+    }
+
+    Some(SeedPost {
+        title,
+        summary,
+        content_md: body.to_string(),
+        cover,
+        tags,
+        book_color,
+        status,
+    })
 }
 
 async fn handle_user_create(pool: &sqlx::SqlitePool, args: &[String]) -> Result<(), String> {

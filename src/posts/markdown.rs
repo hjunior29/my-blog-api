@@ -17,6 +17,8 @@ pub fn render_and_sanitize(markdown: &str) -> String {
             "h1", "h2", "h3", "h4", "h5", "h6", "del", "ins", "table", "thead", "tbody", "tr",
             "th", "td", "hr", "video", "audio", "source",
         ])
+        .add_tag_attributes("code", &["class"])
+        .add_tag_attributes("pre", &["class"])
         .add_tag_attributes("video", &["src", "controls", "preload", "poster", "loop", "muted", "width", "height"])
         .add_tag_attributes("audio", &["src", "controls", "preload", "loop", "muted"])
         .add_tag_attributes("source", &["src", "type"])
@@ -55,5 +57,12 @@ mod tests {
         let html = render_and_sanitize(md);
         assert!(html.contains("<video controls=\"\" src=\"https://example.com/clip.mp4\"></video>") || html.contains("<video src=\"https://example.com/clip.mp4\" controls>"));
         assert!(html.contains("<audio controls=\"\" src=\"https://example.com/sound.mp3\"></audio>") || html.contains("<audio src=\"https://example.com/sound.mp3\" controls>"));
+    }
+
+    #[test]
+    fn markdown_preserves_code_and_pre_class_attributes() {
+        let md = "```mermaid\ngraph TD\n  A --> B\n```";
+        let html = render_and_sanitize(md);
+        assert!(html.contains("class=\"language-mermaid\""));
     }
 }
