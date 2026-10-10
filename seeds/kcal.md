@@ -39,9 +39,9 @@ flowchart LR
         LiveViewProc["LiveView Process"]
         AnvisaEngine["Motor Normativo RDC 429 / IN 75"]
         ReadOnlyDB[("SQLite TACO (Mode: RO)\n597 Alimentos Oficiais")]
-        LiveState <==>|Canal WebSocket TLS| LiveViewProc
+        LiveState <-->|"Canal WebSocket TLS"| LiveViewProc
         LiveViewProc --> AnvisaEngine
-        AnvisaEngine -->|Busca O(1) sem locks| ReadOnlyDB
+        AnvisaEngine -->|"Busca O(1) sem locks"| ReadOnlyDB
     end
 ```
 

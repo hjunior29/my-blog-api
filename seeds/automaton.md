@@ -133,8 +133,8 @@ O Automaton suporta duas topologias espaciais distintas:
 ```mermaid
 flowchart LR
     subgraph Toroidal ["Topologia Toroidal (Rosquinha)"]
-        Top["Borda Superior"] <==> Bottom["Borda Inferior"]
-        Left["Borda Esquerda"] <==> Right["Borda Direita"]
+        Top["Borda Superior"] <--> Bottom["Borda Inferior"]
+        Left["Borda Esquerda"] <--> Right["Borda Direita"]
     end
 
     subgraph Finita ["Topologia Finita (Caixa Fechada)"]
