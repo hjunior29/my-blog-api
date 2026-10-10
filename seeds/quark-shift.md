@@ -73,8 +73,8 @@ flowchart TD
     subgraph Assinantes ["Clientes Inscritos em Tempo Real"]
         Client1["Dashboard Svelte 5 (Cliente 1)"]
         Client2["Monitor Mobile (Cliente 2)"]
-        TopicTree -->|server.publish() na casa dos microssegundos| Client1
-        TopicTree -->|server.publish() na casa dos microssegundos| Client2
+        TopicTree -->|"server.publish() na casa dos microssegundos"| Client1
+        TopicTree -->|"server.publish() na casa dos microssegundos"| Client2
     end
 
     HTTPProducer --> Router
